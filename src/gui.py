@@ -79,7 +79,7 @@ class TraceGui(QtWidgets.QWidget):
         layout.addWidget(self.list_widget)
 
     def _choose_path(self, edit: QtWidgets.QLineEdit):
-        path = QtWidgets.QFileDialog.getExistingDirectory(self, "Select trace directory")
+        path, _ = QtWidgets.QFileDialog.getOpenFileName(self, "Select trace file", "", "All Files (*)")
         if path:
             edit.setText(path)
 
