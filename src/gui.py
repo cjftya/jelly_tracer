@@ -1,7 +1,7 @@
 import atexit
 import sys
 
-from PyQt6 import QtCore, QtWidgets
+from PyQt6 import QtCore, QtGui, QtWidgets
 
 from executor import Executor
 from trace_server_manager import TraceServerManager
@@ -33,8 +33,8 @@ class ExecutorThread(QtCore.QThread):
         self.token_total = 0
 
         def cb(msg: str):
-            if msg.startswith("\token"):
-                self.token_used += int(msg.replace("\token", "").strip())
+            if msg.startswith("\\token"):
+                self.token_used += int(msg.replace("\\token", "").strip())
                 self.token_progress.emit(self.token_used, self.token_total)
             else:
                 self.results.append(msg)
@@ -62,75 +62,121 @@ class ExecutorThread(QtCore.QThread):
         pass
 
 
-class TraceGui(QtWidgets.QWidget):
+class TraceGui(QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
+        # create a simple magnifier emoji icon for the window
+        try:
+            pix = QtGui.QPixmap(64, 64)
+            pix.fill(QtCore.Qt.GlobalColor.transparent)
+            painter = QtGui.QPainter(pix)
+            font = QtGui.QFont()
+            font.setPointSize(48)
+            painter.setFont(font)
+            painter.drawText(pix.rect(), QtCore.Qt.AlignmentFlag.AlignCenter, "🔍")
+            painter.end()
+            self.setWindowIcon(QtGui.QIcon(pix))
+        except Exception:
+            # fallback: ignore if painting fails
+            pass
+
         self.setWindowTitle("LLM Tracer")
-        self.resize(600, 400)
-        self._build_ui()
+        self.resize(800, 600)
+        # central widget holds the main layout
+        central = QtWidgets.QWidget()
+        self.setCentralWidget(central)
         self.thread: ExecutorThread | None = None
 
-    def _build_ui(self):
-        layout = QtWidgets.QVBoxLayout(self)
+        self._build_ui(central)
+        # animate progress bar value changes (token_bar now exists)
+        self.token_animation = QtCore.QPropertyAnimation()
+        self.token_animation.setTargetObject(self.token_bar)
+        self.token_animation.setPropertyName(b"value")
+        self.token_animation.setDuration(300)  # milliseconds
+        # menus not needed
+        self._apply_styles()
 
-        # target package ------------------------------------------------
-        form_target = QtWidgets.QFormLayout()
+    def _build_ui(self, parent: QtWidgets.QWidget):
+        # top-level vertical layout
+        layout = QtWidgets.QVBoxLayout(parent)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(10)
+
+        # --- input section ----------------------------------------------------------------
+        inputs = QtWidgets.QGroupBox("Trace Settings")
+        inputs_layout = QtWidgets.QFormLayout()
+        inputs_layout.setLabelAlignment(QtCore.Qt.AlignmentFlag.AlignRight)
+
         self.package_edit = QtWidgets.QLineEdit()
         self.package_edit.setText("com.sec.android.gallery3d")
-        form_target.addRow("Target Package:", self.package_edit)
-        layout.addLayout(form_target)
+        inputs_layout.addRow("Target package:", self.package_edit)
 
-        # model name ----------------------------------------------------
-        form_target = QtWidgets.QFormLayout()
         self.model_edit = QtWidgets.QLineEdit()
-        self.model_edit.setPlaceholderText(
-            "ollama에 설치된 model name 입력 (예: gemma3-12b)"
-        )
-        form_target.addRow("Model Name:", self.model_edit)
-        layout.addLayout(form_target)
+        self.model_edit.setPlaceholderText("e.g. gemma3-12b")
+        inputs_layout.addRow("Model name:", self.model_edit)
 
-        # path selectors ------------------------------------------------
-        form = QtWidgets.QFormLayout()
         self.normal_edit = QtWidgets.QLineEdit()
         self.slow_edit = QtWidgets.QLineEdit()
-
-        btn_n = QtWidgets.QPushButton("Browse…")
+        btn_n = QtWidgets.QPushButton(
+            self.style().standardIcon(QtWidgets.QStyle.StandardPixmap.SP_DirOpenIcon),
+            "Browse…",
+        )
         btn_n.clicked.connect(lambda: self._choose_path(self.normal_edit))
-        btn_s = QtWidgets.QPushButton("Browse…")
+        btn_s = QtWidgets.QPushButton(
+            self.style().standardIcon(QtWidgets.QStyle.StandardPixmap.SP_DirOpenIcon),
+            "Browse…",
+        )
         btn_s.clicked.connect(lambda: self._choose_path(self.slow_edit))
-
         h_n = QtWidgets.QHBoxLayout()
         h_n.addWidget(self.normal_edit)
         h_n.addWidget(btn_n)
-
         h_s = QtWidgets.QHBoxLayout()
         h_s.addWidget(self.slow_edit)
         h_s.addWidget(btn_s)
+        inputs_layout.addRow("Normal trace:", h_n)
+        inputs_layout.addRow("Slow trace:", h_s)
 
-        form.addRow("Normal trace:", h_n)
-        form.addRow("Slow trace:", h_s)
-        layout.addLayout(form)
+        inputs.setLayout(inputs_layout)
+        layout.addWidget(inputs)
 
-        # run button -----------------------------------------------------
-        self.run_button = QtWidgets.QPushButton("Run")
+        # --- controls ---------------------------------------------------------------------
+        # analyze button uses only text (emoji included)
+        self.run_button = QtWidgets.QPushButton("🔍 Analyze")
         self.run_button.clicked.connect(self._on_run)
+        self.run_button.setFixedHeight(40)
+        self.run_button.setSizePolicy(
+            QtWidgets.QSizePolicy.Policy.Expanding,
+            QtWidgets.QSizePolicy.Policy.Fixed,
+        )
         layout.addWidget(self.run_button)
 
-        # token usage text + progress ------------------------------------
+        # --- progress / tokens -------------------------------------------------------------
+        token_box = QtWidgets.QHBoxLayout()
         self.token_label = QtWidgets.QLabel("Tokens: 0 / 0 (0%)")
-        layout.addWidget(self.token_label)
+        token_box.addWidget(self.token_label)
+        token_box.addStretch(1)
+        layout.addLayout(token_box)
+
         self.token_bar = QtWidgets.QProgressBar()
         self.token_bar.setMinimum(0)
-        self.token_bar.setMaximum(1)  # will be reset when actual total known
+        self.token_bar.setMaximum(1)
         self.token_bar.setTextVisible(False)
-        self.token_bar.setSizePolicy(
-            QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Fixed
+        # make the bar slimmer and more modern-looking
+        self.token_bar.setFixedHeight(8)
+        self.token_bar.setStyleSheet(
+            "QProgressBar {border: 1px solid #aaa; border-radius: 4px; background: #eee;} QProgressBar::chunk {background: #007acc; border-radius: 4px;}"
         )
         layout.addWidget(self.token_bar)
 
-        # results list --------------------------------------------------
-        self.list_widget = QtWidgets.QListWidget()
-        layout.addWidget(self.list_widget)
+        # --- results ----------------------------------------------------------------------
+        result_box = QtWidgets.QGroupBox("Output")
+        result_layout = QtWidgets.QVBoxLayout()
+        self.text_edit = QtWidgets.QTextEdit()
+        self.text_edit.setReadOnly(True)
+        self.text_edit.setLineWrapMode(QtWidgets.QTextEdit.LineWrapMode.WidgetWidth)
+        result_layout.addWidget(self.text_edit)
+        result_box.setLayout(result_layout)
+        layout.addWidget(result_box)
 
     def _choose_path(self, edit: QtWidgets.QLineEdit):
         path, _ = QtWidgets.QFileDialog.getOpenFileName(
@@ -160,7 +206,7 @@ class TraceGui(QtWidgets.QWidget):
             )
             return
 
-        self.list_widget.clear()
+        self.text_edit.clear()
         self.run_button.setEnabled(False)
         self.thread = ExecutorThread(normal, slow, target_pkg, model)
         self.thread.progress.connect(self._append_line)
@@ -169,18 +215,21 @@ class TraceGui(QtWidgets.QWidget):
         self.thread.start()
 
     def _append_line(self, line: str):
-        # \r로 시작하면 마지막 항목을 업데이트 (spinner용)
+        # spinner updates: replace last line if starts with \r
         if line.startswith("\r"):
-            if self.list_widget.count() > 0:
-                last_item = self.list_widget.item(self.list_widget.count() - 1)
-                last_item.setText(line[1:])  # \r 제거
-            else:
-                self.list_widget.addItem(line[1:])
+            cursor = self.text_edit.textCursor()
+            cursor.movePosition(QtGui.QTextCursor.MoveOperation.End)
+            # remove previous block (up to newline)
+            cursor.select(QtGui.QTextCursor.SelectionType.BlockUnderCursor)
+            cursor.removeSelectedText()
+            cursor.insertText(line[1:])
         else:
-            for ln in line.splitlines():
-                if ln:
-                    self.list_widget.addItem(ln)
-                    self.list_widget.scrollToBottom()
+            # append full string preserving newlines
+            self.text_edit.append(line)
+            # ensure scroll
+            self.text_edit.verticalScrollBar().setValue(
+                self.text_edit.verticalScrollBar().maximum()
+            )
 
     def _on_finished(self, results: list):
         self.run_button.setEnabled(True)
@@ -190,10 +239,58 @@ class TraceGui(QtWidgets.QWidget):
         pct = int(used / total * 100) if total > 0 else 0
         self.token_label.setText(f"Tokens: {used:,} / {total:,} ({pct}%)")
         self.token_bar.setMaximum(total)
-        self.token_bar.setValue(used)
+        # animate to new value
+        self.token_animation.stop()
+        self.token_animation.setStartValue(self.token_bar.value())
+        self.token_animation.setEndValue(used)
+        self.token_animation.start()
+
+    # helpers for styling only
+
+    def _apply_styles(self):
+        # use a clean fusion style and light coloring
+        QtWidgets.QApplication.setStyle("Fusion")
+        palette = QtGui.QPalette()
+        palette.setColor(QtGui.QPalette.ColorRole.Window, QtGui.QColor(245, 245, 245))
+        palette.setColor(
+            QtGui.QPalette.ColorRole.WindowText, QtCore.Qt.GlobalColor.black
+        )
+        palette.setColor(QtGui.QPalette.ColorRole.Base, QtGui.QColor(255, 255, 255))
+        palette.setColor(
+            QtGui.QPalette.ColorRole.AlternateBase, QtGui.QColor(240, 240, 240)
+        )
+        palette.setColor(
+            QtGui.QPalette.ColorRole.ToolTipBase, QtCore.Qt.GlobalColor.black
+        )
+        palette.setColor(
+            QtGui.QPalette.ColorRole.ToolTipText, QtCore.Qt.GlobalColor.white
+        )
+        palette.setColor(QtGui.QPalette.ColorRole.Text, QtCore.Qt.GlobalColor.black)
+        palette.setColor(QtGui.QPalette.ColorRole.Button, QtGui.QColor(220, 220, 220))
+        palette.setColor(
+            QtGui.QPalette.ColorRole.ButtonText, QtCore.Qt.GlobalColor.black
+        )
+        palette.setColor(QtGui.QPalette.ColorRole.Highlight, QtGui.QColor(0, 120, 215))
+        palette.setColor(
+            QtGui.QPalette.ColorRole.HighlightedText, QtCore.Qt.GlobalColor.white
+        )
+        QtWidgets.QApplication.setPalette(palette)
+        # round corners for various widgets
+        sheet = """
+            QGroupBox { border: 1px solid #888; border-radius: 8px; margin-top: 6px; }
+            QGroupBox:title { subcontrol-origin: margin; subcontrol-position: top left; padding: 0 3px; }
+            QPushButton { border: 1px solid #888; border-radius: 6px; padding: 4px 12px; }
+            QPushButton:hover { background-color: #e6f2ff; }
+            QLineEdit, QTextEdit { border: 1px solid #bbb; border-radius: 6px; padding: 2px; }
+        """
+        # apply style sheet via the existing application instance
+        app = QtWidgets.QApplication.instance()
+        if app:
+            app.setStyleSheet(sheet)
 
 
 if __name__ == "__main__":
+    # ensure QApplication is created before styling
     app = QtWidgets.QApplication(sys.argv)
     window = TraceGui()
     window.show()
