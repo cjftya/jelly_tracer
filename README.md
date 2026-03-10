@@ -12,118 +12,99 @@
 
 ```
 
-# 🕵️‍♂️ TraceDetectiveAndroid (v1.2)
+# 🕵️‍♂️ TraceDetectiveAndroid (v1.3) : The Forensic Expert
 
 > **"Data never lies. The culprit is in the traces."**
-> 안드로이드 성능 지연의 근본 원인을 자율적으로 추론하고 규명하는 **에이전트 기반 AI 분석기**
+> AI 에이전트 기반의 Android 성능 포렌식 및 병목 자동 분석 솔루션
 
-`TraceDetectiveAndroid`는 Perfetto 트레이스 데이터를 기반으로 **Normal 대비 Slow 상황의 차이(Δ)**를 정밀 분석하여 성능 병목의 원인을 찾아내는 AI 에이전트 시스템입니다. 단순한 분석 툴을 넘어, 스스로 가설을 세우고 도구를 운용하는 **자율형 분석 아키텍처**를 지향합니다.
-
----
-
-## 🌟 Key Features
-
-### 1. 🧠 자율형 에이전트 추론 (Autonomous Agentic Reasoning)
-단순한 데이터 요약을 넘어, AI 에이전트가 스스로 가설을 세우고 적절한 도구를 선택하여 **최대 8라운드** 동안 재귀적인 심층 분석을 수행합니다.
-* **Self-Correction:** 분석 과정에서 논리적 모순이나 쿼리 에러 발생 시 스스로 수정하여 재분석 시도.
-* **Multi-Step Chain of Thought:** 복잡하게 얽힌 성능 지표 사이의 상관관계를 단계별 추론을 통해 명확히 규명.
-
-### 2. 🧬 정밀 델타(Δ) 분석 기법
-"왜 느린가?"에 대한 답을 찾기 위해 ΔT = T_slow - T_normal 데이터를 수학적으로 대조 분석합니다.
-* **Causal Chain 추적:** Binder 지연, Lock 경합, GC 발생 등 복잡한 인과관계를 논리적 체인으로 연결하여 분석.
-
-### 3. 🎯 신뢰 기반의 분석 정밀도 (Precision & Grounding)
-환각(Hallucination)을 억제하고 **데이터에 기반한 확정적 결론**만을 도출합니다.
-* **Zero-Temperature Determinism:** `Temperature: 0.0` 설정을 통해 분석 결과의 일관성과 논리적 엄밀성 확보.
-* **Evidence-Based Reporting:** 모든 분석 결과는 추출된 JSON 데이터의 특정 필드를 근거(Grounding)로 제시.
-* **Hallucination Guard:** 증거가 불충분하거나 데이터가 동일할 경우, 억측을 배제하고 "분석 불가" 사유를 논리적으로 보고.
+`TraceDetectiveAndroid`는 Perfetto 트레이스 데이터를 기반으로 앱의 지연 현상(Jank/Lag)을 추적하는 **자율형 분석 에이전트**입니다. 단순히 데이터를 시각화하는 것을 넘어, AI가 직접 DB에 질의하고 가설을 검증하며 엔지니어에게 '정답에 가까운 통찰'을 제공합니다.
 
 ---
 
-## 🛠️ The Elite Eight
+## 🚀 Core Capabilities
 
-성능 지연의 실체를 밝히기 위해 AI 에이전트가 자유자재로 운용하는 8가지 핵심 도구입니다.
+### 1. 🧬 Delta-Driven Investigation
+성능 이슈의 본질인 '회귀(Regression)'를 타격하기 위해 **정상(Normal) vs 지연(Slow)** 구간의 데이터를 수학적으로 대조합니다.
+* **$ΔT = T_{slow} - T_{normal}$**: 변화가 발생한 지점만을 필터링하여 분석 노이즈를 근본적으로 차단합니다.
 
-1. **System-wide Delta Scan**
-   * 시스템 마일스톤 비교를 통해 지연 시작점을 특정하고 CPU 점유율 Top 10 프로세스를 식별합니다.
-2. **UI/Main-thread Profiling**
-   * 대상 앱의 UI 스레드 내 함수 호출 이력을 분석하여 실행 시간이 길어진 병목 구간을 색출합니다.
-3. **IPC & Binder Analysis**
-   * 프로세스 간 통신(IPC) 과정을 분석하고 응답을 지연시킨 서버 프로세스를 식별합니다.
-4. **Thread Scheduling (Kernel States)**
-   * 스레드가 Running이었는지, Runnable 상태로 자원을 기다렸는지 분석하여 CPU 경합 원인을 파악합니다.
-5. **Lock & Mutex Contention**
-   * 자원 점유를 위한 대기 상황을 분석하고 자원을 붙잡고 있는 원인 스레드를 역추적합니다.
-6. **Memory & GC Inspector**
-   * Garbage Collection 발생 시점과 이로 인한 'Stop-the-world' 지연 시간을 정밀 확인합니다.
-7. **Thread Interaction & Function Detail**
-   * 특정 스레드 내 상세 함수 단위 실행 시간을 전수 조사하여 미세한 연산 지연을 포착합니다.
-8. **Autonomous Custom SQL**
-   * 에이전트의 직관에 따라 DB에 직접 질의하여 특수하고 복잡한 인과관계를 규명합니다.
+### 2. ⚖️ Autonomous Decision Routing (50% Rule)
+분석 중 확보된 데이터의 분포에 따라 AI가 다음 수사 경로를 스스로 결정합니다.
+* **Workload 분석**: 특정 함수의 점유율이 낮을 경우, 내부 로직이 아닌 시스템 간섭(Binder, CPU Scheduling, Lock)으로 수사망을 자동 전환하여 분석의 유효성을 높입니다.
+
+### 3. 🛡️ Robust Query Abstraction (Golden Path)
+Perfetto의 복잡한 SQL 스키마에서 발생할 수 있는 휴먼 에러와 AI 환각을 방지하기 위해 **검증된 조인 경로(Golden Join Path)**를 표준화했습니다. 쿼리 실패 시 에러 메시지를 분석하여 스스로 코드를 수정하는 Self-Correction 메커니즘이 포함되어 있습니다.
+
+### 4. 📉 Efficient Context Diet
+제한된 컨텍스트 윈도우(16k) 내에서 장기 수사를 진행하기 위해 **Sliding Window 기반의 데이터 압축 기술**을 적용했습니다. 불필요한 과거 데이터를 요약본으로 대체하여 최신 추론의 정밀도를 유지합니다.
 
 ---
 
-## 🔄 Investigation Workflow
+## 🛠️ The Elite Eight (Analytic Tools)
 
-1. **가설 수립 (Hypothesis Generation)**
-   * 델타 분석으로 지연 시점을 특정하고 첫 번째 가설 수립.
-2. **도구 선정 (Tool Selection)**
-   * 8가지 정예 도구(Elite Eight) 중 가설 검증에 가장 적합한 도구 선택.
-3. **데이터 교차 검증 (Cross-Verification)**
-   * 추출 데이터를 바탕으로 가설 확인 및 실시간 수정.
-4. **컨텍스트 최적화 (Context Management)**
-   * N-2 Round Diet 로직으로 분석 핵심 단서 상시 유지.
-5. **심층 추적 (Recursive Deep-Dive)**
-   * 필요 시 직접 Custom SQL을 작성하여 DB 심층부 분석.
-6. **분석 종결 및 보고 (Final Verdict)**
-   * 증거 일관성을 점수화(Confidence Score)하여 최종 보고서 생성.
+성능 분석을 위해 AI 에이전트가 전략적으로 운용하는 8가지 핵심 모듈입니다.
+
+* **System Scanner**: 전역 CPU 점유율 및 병목 발화점 식별
+* **Process Tracker**: 프로세스 간 리소스 경합 및 타 프로세스 간섭 수사
+* **Binder Inspector**: IPC(Binder) 통신 지연 및 시스템 서비스 응답성 분석
+* **Kernel Profiler**: Thread State(Running/Runnable/Sleep) 분석을 통한 스케줄링 이슈 확인
+* **Lock Detective**: Java/Native 영역의 모니터 경합 및 소유권(Ownership) 추적
+* **Memory Monitor**: GC 오버헤드 및 대용량 힙 할당 패턴 분석
+* **Function Auditor**: 특정 스레드 내부 함수의 실행 시간 정밀 부검
+* **Custom SQL Agent**: 복합 이슈 해결을 위한 자율적 SQL 질의 및 데이터 가공
 
 ---
 
-## 📋 Sample Investigation Report
+## 📜 Forensic Report Sample
 
 ```text
+══════════════════════════════════════════════════════════════════════
+       📜 [ ANDROID PERFORMANCE FORENSIC REPORT : v1.3 ]
+══════════════════════════════════════════════════════════════════════
+📝 분석 요약 (Summary)
+   "Portrait 모드 촬영 시 PortraitProc 스레드에서 약 120ms의 프레임 드랍 발생"
 
-═════════════════════════════════════════════════════════════════
-📜 [ TRACEDETECTIVE ANALYSIS REPORT : v1.2 ]
-═════════════════════════════════════════════════════════════════
-📝 분석 요약
-   "Gallery 앱 앨범 진입 시 발생하는 0.13초 프레임 드랍 검거"
+🚩 근본 원인 (Root Cause Identified)
+   ▶ 카메라 프로바이더(ISP)로부터의 데이터 수신 Binder Transaction 지연 (+98.50ms)
 
-🚩 근본 원인 (Root Cause)
-   ▶ 중첩된 LinearLayout 구조로 인한 재귀적 View.onMeasure 과부하
-
-🔍 증거 상태 및 사용 도구
-   [Verified] 🛠️ System Scan, UI Profiling, Scheduling, Custom SQL
-─────────────────────────────────────────────────────────────────
+🛠️ 수사 경로 및 증거 요약
+   • 사용 도구: initial_system_scan, check_thread_scheduling, trace_binder_calls
+   • 증거 데이터: 스레드 상태가 Sleeping으로 급증했으며, Binder 호출 시간과 99% 일치.
+──────────────────────────────────────────────────────────────────────
 📊 상세 분석 데이터 (Analysis Detail)
-   • Delta Analysis: 정상 구간 대비 Main 스레드 132ms 초과 점유
-   • Bottleneck: View.onMeasure 실행 시간이 단일 프레임 기준 118ms 기록
-   • Structural Issue: View Hierarchy 깊이 14단계 도달 (임계치 초과)
-─────────────────────────────────────────────────────────────────
+   | Rank | Name | Delta | Ratio | Status |
+   | :--- | :--- | :--- | :--- | :--- |
+   | 1 | Binder:camera_provider | +98.50ms | 81.7% | 🔴 INC |
+   | 2 | PD_Disparity_Calc | +15.20ms | 12.6% | 🔴 INC |
+──────────────────────────────────────────────────────────────────────
 ✅ 최종 권고 사항 (Fix Recommendation)
-   ☞ 계층 구조 평탄화: ConstraintLayout을 활용하여 View 깊이 축소
-   ☞ 비동기 처리: AsyncLayoutInflator 도입으로 UI 스레드 부하 분산
-═════════════════════════════════════════════════════════════════
-    🔍 [유력 용의자 특정] 고도로 신뢰할 수 있는 분석 결과 | 신뢰도: [██████████████████░░] 90%
-═════════════════════════════════════════════════════════════════
+   ☞ ISP 서비스 측의 버퍼 관리 로직 및 데드락 가능성 조사를 요청하십시오.
+   ☞ 해당 Binder 호출을 메인 루프에서 분리하여 비동기 처리할 것을 권고합니다.
+══════════════════════════════════════════════════════════════════════
+      ⚖️ [범행 확정] 결정적 증거 확보  |  신뢰 지수: [██████████████████░░] 92%
+══════════════════════════════════════════════════════════════════════
 
 ```
 
 ---
 
-## 🏗️ Architecture & Tech Stack
+## 🏗️ Architecture & Forensic Env
+
+### ⚙️ Optimization & Environment
+* **Q4 KV Cache & Flash Attention**: 컨텍스트 확장 시 메모리 점유 최적화
+* **GGML Unified Memory**: RTX 3050/4050 등 저사양 GPU에서의 12B 모델 안정 구동 지원
 
 ### 💻 Software Stack
 * **Language:** Python 3.10+
-* **AI Engine:** Google Gemma 3 12B (Q4_K_M Quantized)
-* **Runtime:** Ollama (with Custom CUDA Optimization)
+* **AI Engine:** Google Gemma 3
+* **Runtime:** Ollama (Custom Forensic Optimization)
 * **Trace Engine:** Google Perfetto Trace Processor
 
-### ⚙️ Optimization Layer
-* **VRAM Efficiency:** RTX 4050(6GB) 환경에 최적화된 Unified Memory 및 Flash Attention 적용.
-* **Context Management:** `N-2 Round Diet` 로직을 통한 16k 컨텍스트 윈도우 효율 극대화.
-* **Environment:** CUDA-accelerated environment variables injection.
+---
+
+## 📅 Roadmap (Future Vision)
+
+- [ ] **Multi-Model Support**: Gemma 3 외에 Llama 3.x, Mistral 계열 최적화 지원.
+- [ ] **Support Linux**: Linux 환경 지원.
 
 ---
 
@@ -133,4 +114,4 @@
 
 ---
 
-*Documentation generated by TraceDetectiveAndroid v1.2*
+*Documentation generated by TraceDetectiveAndroid v1.3*

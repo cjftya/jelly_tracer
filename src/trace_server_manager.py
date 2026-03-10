@@ -15,7 +15,7 @@ class TraceServerManager:
         self.trace_n = trace_n
         self.trace_s = trace_s
 
-        print("🚀 서버 시작 중...")
+        print("🚀 Trace 분석 환경 설정중...")
         configs = [(9001, self.trace_n), (9002, self.trace_s)]
 
         for port, trace in configs:
@@ -40,10 +40,10 @@ class TraceServerManager:
             self.procs.append(proc)
 
         time.sleep(5)
-        print("✅ 모든 서버가 대기 중입니다")
+        print("✅ 완료")
 
     def stop_servers(self):
         print(f"🚿 서버 소켓 반납 중...{len(self.procs)}개")
         for proc in self.procs:
             proc.terminate()
-        print("✅ 모든 서버가 안전하게 닫혔습니다")
+        print("✅ 완료")

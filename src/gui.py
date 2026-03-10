@@ -1,49 +1,69 @@
 import atexit
+import threading
+import tkinter as tk
+from tkinter import filedialog, messagebox
 import sys
+import io
 
-from PyQt6 import QtCore, QtGui, QtWidgets
+import customtkinter as ctk
 
 from executor import Executor
 from trace_server_manager import TraceServerManager
 
 
-class ExecutorThread(QtCore.QThread):
-    progress = QtCore.pyqtSignal(str)
-    finished = QtCore.pyqtSignal(list)
-    token_progress = QtCore.pyqtSignal(int, int)  # used, total
+class ConsoleRedirector:
+    def __init__(self, callback):
+        self.callback = callback
 
+    def write(self, text):
+        if text:
+            self.callback(text)
+
+    def flush(self):
+        pass
+
+
+class ExecutorThread(threading.Thread):
     def __init__(
         self,
         normal_path: str,
         slow_path: str,
         target_package: str = None,
         model_name: str = "gemma3-12b",
+        progress_callback=None,
+        token_callback=None,
+        finished_callback=None,
     ):
-        super().__init__()
+        super().__init__(daemon=True)
         self.normal_path = normal_path
         self.slow_path = slow_path
         self.target_package = target_package
         self.model_name = model_name
+        self.progress_callback = progress_callback
+        self.token_callback = token_callback
+        self.finished_callback = finished_callback
         self.results: list[str] = []
         self.server_manager = TraceServerManager()
         atexit.register(self.stop)
+        self._stop_event = threading.Event()
 
     def run(self):
         self.token_used = 0
         self.token_total = 0
 
-        def cb(msg: str):
+        def cb(msg: str, system: bool):
             if msg.startswith("\\token"):
                 self.token_used += int(msg.replace("\\token", "").strip())
-                self.token_progress.emit(self.token_used, self.token_total)
+                if self.token_callback:
+                    self.token_callback(self.token_used, self.token_total)
             else:
                 self.results.append(msg)
-                self.progress.emit(msg)
+                if self.progress_callback:
+                    self.progress_callback(msg, system)
 
         self.server_manager.start_servers(self.normal_path, self.slow_path)
 
         executor = Executor(model_name=self.model_name)
-        # grab actual context size from OllamaManager if available
         try:
             self.token_total = executor.ollamaManager.get_context_size()
         except Exception:
@@ -54,244 +74,333 @@ class ExecutorThread(QtCore.QThread):
             self.target_package,
             output_callback=cb,
         )
-        self.finished.emit(self.results)
+        if self.finished_callback:
+            self.finished_callback(self.results)
 
     def stop(self):
-        if self.server_manager != None:
-            self.server_manager.stop_servers()
-        pass
+        try:
+            if self.server_manager:
+                self.server_manager.stop_servers()
+        except Exception:
+            pass
+        self._stop_event.set()
 
 
-class TraceGui(QtWidgets.QMainWindow):
+class TraceGui(ctk.CTk):
     def __init__(self):
         super().__init__()
-        # create a simple magnifier emoji icon for the window
-        try:
-            pix = QtGui.QPixmap(64, 64)
-            pix.fill(QtCore.Qt.GlobalColor.transparent)
-            painter = QtGui.QPainter(pix)
-            font = QtGui.QFont()
-            font.setPointSize(48)
-            painter.setFont(font)
-            painter.drawText(pix.rect(), QtCore.Qt.AlignmentFlag.AlignCenter, "🔍")
-            painter.end()
-            self.setWindowIcon(QtGui.QIcon(pix))
-        except Exception:
-            # fallback: ignore if painting fails
-            pass
+        self.title("Trace Analyzer")
+        self.geometry("1100x700")
+        self.protocol("WM_DELETE_WINDOW", self._on_close)
 
-        self.setWindowTitle("LLM Tracer")
-        self.resize(800, 600)
-        # central widget holds the main layout
-        central = QtWidgets.QWidget()
-        self.setCentralWidget(central)
+        # Output Redirection (Redirect print() to System Log)
+        self.original_stdout = sys.stdout
+        sys.stdout = ConsoleRedirector(self._on_stdout_write)
+
+        # Theme & Appearance
+        ctk.set_appearance_mode("dark")
+        ctk.set_default_color_theme("blue")
+
         self.thread: ExecutorThread | None = None
+        self.console_font_size = 10
+        
+        # Configure Grid
+        self.grid_columnconfigure(1, weight=1)
+        self.grid_rowconfigure(0, weight=1)
 
-        self._build_ui(central)
-        # animate progress bar value changes (token_bar now exists)
-        self.token_animation = QtCore.QPropertyAnimation()
-        self.token_animation.setTargetObject(self.token_bar)
-        self.token_animation.setPropertyName(b"value")
-        self.token_animation.setDuration(300)  # milliseconds
-        # menus not needed
-        self._apply_styles()
+        self._build_ui()
 
-    def _build_ui(self, parent: QtWidgets.QWidget):
-        # top-level vertical layout
-        layout = QtWidgets.QVBoxLayout(parent)
-        layout.setContentsMargins(12, 12, 12, 12)
-        layout.setSpacing(10)
+    def _build_ui(self):
+        # --- Sidebar ---
+        self.sidebar_frame = ctk.CTkFrame(self, width=280, corner_radius=0, fg_color="#1A1A1A")
+        self.sidebar_frame.grid(row=0, column=0, sticky="nsew")
+        self.sidebar_frame.grid_rowconfigure(10, weight=1)
 
-        # --- input section ----------------------------------------------------------------
-        inputs = QtWidgets.QGroupBox("Trace Settings")
-        inputs_layout = QtWidgets.QFormLayout()
-        inputs_layout.setLabelAlignment(QtCore.Qt.AlignmentFlag.AlignRight)
-
-        self.package_edit = QtWidgets.QLineEdit()
-        self.package_edit.setText("com.sec.android.gallery3d")
-        inputs_layout.addRow("Target package:", self.package_edit)
-
-        self.model_edit = QtWidgets.QLineEdit()
-        self.model_edit.setPlaceholderText("e.g. gemma3-12b")
-        inputs_layout.addRow("Model name:", self.model_edit)
-
-        self.normal_edit = QtWidgets.QLineEdit()
-        self.slow_edit = QtWidgets.QLineEdit()
-        btn_n = QtWidgets.QPushButton(
-            self.style().standardIcon(QtWidgets.QStyle.StandardPixmap.SP_DirOpenIcon),
-            "Browse…",
+        # Trace Settings Group
+        self.settings_label = ctk.CTkLabel(
+            self.sidebar_frame, text="CONFIGURATION", font=ctk.CTkFont(size=12, weight="bold"), 
+            text_color="#888888", anchor="w"
         )
-        btn_n.clicked.connect(lambda: self._choose_path(self.normal_edit))
-        btn_s = QtWidgets.QPushButton(
-            self.style().standardIcon(QtWidgets.QStyle.StandardPixmap.SP_DirOpenIcon),
-            "Browse…",
+        self.settings_label.grid(row=0, column=0, padx=25, pady=(40, 10), sticky="w")
+
+        self.package_edit = ctk.CTkEntry(
+            self.sidebar_frame, placeholder_text="Target package", height=40, border_width=1, fg_color="#242424"
         )
-        btn_s.clicked.connect(lambda: self._choose_path(self.slow_edit))
-        h_n = QtWidgets.QHBoxLayout()
-        h_n.addWidget(self.normal_edit)
-        h_n.addWidget(btn_n)
-        h_s = QtWidgets.QHBoxLayout()
-        h_s.addWidget(self.slow_edit)
-        h_s.addWidget(btn_s)
-        inputs_layout.addRow("Normal trace:", h_n)
-        inputs_layout.addRow("Slow trace:", h_s)
+        self.package_edit.insert(0, "com.sec.android.gallery3d")
+        self.package_edit.grid(row=1, column=0, padx=25, pady=10, sticky="ew")
 
-        inputs.setLayout(inputs_layout)
-        layout.addWidget(inputs)
-
-        # --- controls ---------------------------------------------------------------------
-        # analyze button uses only text (emoji included)
-        self.run_button = QtWidgets.QPushButton("🔍 Analyze")
-        self.run_button.clicked.connect(self._on_run)
-        self.run_button.setFixedHeight(40)
-        self.run_button.setSizePolicy(
-            QtWidgets.QSizePolicy.Policy.Expanding,
-            QtWidgets.QSizePolicy.Policy.Fixed,
+        self.model_edit = ctk.CTkEntry(
+            self.sidebar_frame, placeholder_text="Model name", height=40, border_width=1, fg_color="#242424"
         )
-        layout.addWidget(self.run_button)
+        self.model_edit.insert(0, "gemma3-12b")
+        self.model_edit.grid(row=2, column=0, padx=25, pady=10, sticky="ew")
 
-        # --- progress / tokens -------------------------------------------------------------
-        token_box = QtWidgets.QHBoxLayout()
-        self.token_label = QtWidgets.QLabel("Tokens: 0 / 0 (0%)")
-        token_box.addWidget(self.token_label)
-        token_box.addStretch(1)
-        layout.addLayout(token_box)
-
-        self.token_bar = QtWidgets.QProgressBar()
-        self.token_bar.setMinimum(0)
-        self.token_bar.setMaximum(1)
-        self.token_bar.setTextVisible(False)
-        # make the bar slimmer and more modern-looking
-        self.token_bar.setFixedHeight(8)
-        self.token_bar.setStyleSheet(
-            "QProgressBar {border: 1px solid #aaa; border-radius: 4px; background: #eee;} QProgressBar::chunk {background: #007acc; border-radius: 4px;}"
+        # Separator-like padding
+        self.path_label = ctk.CTkLabel(
+            self.sidebar_frame, text="RESOURCES", font=ctk.CTkFont(size=12, weight="bold"), 
+            text_color="#888888", anchor="w"
         )
-        layout.addWidget(self.token_bar)
+        self.path_label.grid(row=3, column=0, padx=25, pady=(20, 10), sticky="w")
 
-        # --- results ----------------------------------------------------------------------
-        result_box = QtWidgets.QGroupBox("Output")
-        result_layout = QtWidgets.QVBoxLayout()
-        self.text_edit = QtWidgets.QTextEdit()
-        self.text_edit.setReadOnly(True)
-        self.text_edit.setLineWrapMode(QtWidgets.QTextEdit.LineWrapMode.WidgetWidth)
-        result_layout.addWidget(self.text_edit)
-        result_box.setLayout(result_layout)
-        layout.addWidget(result_box)
+        # Path Selection
+        self.path_frame = ctk.CTkFrame(self.sidebar_frame, fg_color="transparent")
+        self.path_frame.grid(row=4, column=0, padx=25, pady=10, sticky="ew")
+        self.path_frame.grid_columnconfigure(0, weight=1)
 
-    def _choose_path(self, edit: QtWidgets.QLineEdit):
-        path, _ = QtWidgets.QFileDialog.getOpenFileName(
-            self, "Select trace file", "", "All Files (*)"
+        self.normal_edit = ctk.CTkEntry(self.path_frame, placeholder_text="Normal trace path", height=35, fg_color="#242424")
+        self.normal_edit.grid(row=0, column=0, sticky="ew", pady=(0, 5))
+        self.btn_n = ctk.CTkButton(
+            self.path_frame, text="Browse Normal", command=lambda: self._choose_path(self.normal_edit),
+            height=32, fg_color="#333333", hover_color="#444444", text_color="#AAAAAA"
+        )
+        self.btn_n.grid(row=1, column=0, sticky="ew", pady=(0, 20))
+
+        self.slow_edit = ctk.CTkEntry(self.path_frame, placeholder_text="Slow trace path", height=35, fg_color="#242424")
+        self.slow_edit.grid(row=2, column=0, sticky="ew", pady=(0, 5))
+        self.btn_s = ctk.CTkButton(
+            self.path_frame, text="Browse Slow", command=lambda: self._choose_path(self.slow_edit),
+            height=32, fg_color="#333333", hover_color="#444444", text_color="#AAAAAA"
+        )
+        self.btn_s.grid(row=3, column=0, sticky="ew")
+
+        # --- Main Content ---
+        self.main_container = ctk.CTkFrame(self, corner_radius=0, fg_color="#0F0F0F")
+        self.main_container.grid(row=0, column=1, sticky="nsew")
+        self.main_container.grid_columnconfigure(0, weight=1)
+        self.main_container.grid_rowconfigure(3, weight=1)  # Console row should expand
+        self.main_container.grid_rowconfigure(0, weight=0)
+        self.main_container.grid_rowconfigure(1, weight=0)
+        self.main_container.grid_rowconfigure(2, weight=0)  # Status row should NOT expand
+
+        # Header with Run Button
+        self.header_frame = ctk.CTkFrame(self.main_container, fg_color="transparent")
+        self.header_frame.grid(row=0, column=0, sticky="ew", padx=30, pady=(30, 20))
+        self.header_frame.grid_columnconfigure(0, weight=1)
+
+        self.status_label = ctk.CTkLabel(
+            self.header_frame, text="System Standby", font=ctk.CTkFont(size=24, weight="bold")
+        )
+        self.status_label.grid(row=0, column=0, sticky="w")
+
+        self.run_button = ctk.CTkButton(
+            self.header_frame, text="INITIALIZE ANALYSIS", command=self._on_run,
+            font=ctk.CTkFont(size=12, weight="bold"), height=45, width=180,
+            fg_color="#1F538D", hover_color="#2666AD", corner_radius=5
+        )
+        self.run_button.grid(row=0, column=1, sticky="e")
+
+        # Stats Card
+        self.stats_frame = ctk.CTkFrame(self.main_container, corner_radius=8, fg_color="#161616", border_width=1, border_color="#222222")
+        self.stats_frame.grid(row=1, column=0, sticky="ew", pady=(0, 30), padx=30)
+        self.stats_frame.grid_columnconfigure(0, weight=1)
+
+        self.token_info_frame = ctk.CTkFrame(self.stats_frame, fg_color="transparent")
+        self.token_info_frame.pack(fill="x", padx=25, pady=(20, 10))
+
+        self.token_label = ctk.CTkLabel(
+            self.token_info_frame, text="Tokens: 0 / 0 (0%)", font=ctk.CTkFont(family="Consolas", size=13),
+            text_color="#888888"
+        )
+        self.token_label.pack(side="left")
+
+        self.token_bar = ctk.CTkProgressBar(self.stats_frame, height=8, progress_color="#1F538D", fg_color="#333333")
+        self.token_bar.set(0)
+        self.token_bar.pack(fill="x", padx=25, pady=(0, 20))
+
+        # Real-time Status View (Spinner)
+        self.realtime_status = ctk.CTkLabel(
+            self.main_container, text="", font=ctk.CTkFont(family="Consolas", size=12),
+            text_color="#888888", anchor="w", height=25
+        )
+        self.realtime_status.grid(row=2, column=0, sticky="ew", padx=35, pady=(0, 2))
+
+        # Console / Terminal View (Split)
+        self.console_frame = ctk.CTkFrame(self.main_container, corner_radius=8, fg_color="#121212", border_width=1, border_color="#222222")
+        self.console_frame.grid(row=3, column=0, sticky="nsew", padx=30, pady=(0, 30))
+        self.console_frame.grid_rowconfigure(0, weight=1)
+        self.console_frame.grid_columnconfigure(0, weight=1)
+
+        # PanedWindow for split view
+        self.paned_window = tk.PanedWindow(self.console_frame, orient=tk.HORIZONTAL, bg="#1A1A1A", sashwidth=4, bd=0, sashrelief=tk.FLAT)
+        self.paned_window.grid(row=0, column=0, sticky="nsew", padx=0, pady=0)
+
+        # Left Pane: AI
+        self.left_pane = ctk.CTkFrame(self.paned_window, fg_color="#0F0F0F", corner_radius=0)
+        self.left_header = ctk.CTkLabel(
+            self.left_pane, text=" AI INVESTIGATOR", font=ctk.CTkFont(size=10, weight="bold"), 
+            text_color="#555555", anchor="w", height=20
+        )
+        self.left_header.pack(fill="x", padx=5, pady=(2, 0))
+        
+        self.text_edit = tk.Text(
+            self.left_pane, 
+            font=("Consolas", 10),
+            bg="#0F0F0F", fg="#CCCCCC",
+            insertbackground="white",
+            borderwidth=0, relief="flat",
+            highlightthickness=1, highlightbackground="#222222",
+            padx=10, pady=10,
+            spacing1=2, spacing3=2 # Increase line spacing
+        )
+        self.text_edit.pack(fill="both", expand=True)
+        self.paned_window.add(self.left_pane, stretch="always")
+
+        # Right Pane: System
+        self.right_pane = ctk.CTkFrame(self.paned_window, fg_color="#0F0F0F", corner_radius=0)
+        self.right_header = ctk.CTkLabel(
+            self.right_pane, text=" SYSTEM LOG", font=ctk.CTkFont(size=10, weight="bold"), 
+            text_color="#555555", anchor="w", height=20
+        )
+        self.right_header.pack(fill="x", padx=5, pady=(2, 0))
+
+        self.system_edit = tk.Text(
+            self.right_pane, 
+            font=("Consolas", 10),
+            bg="#0F0F0F", fg="#CCCCCC",
+            insertbackground="white",
+            borderwidth=0, relief="flat",
+            highlightthickness=1, highlightbackground="#222222",
+            padx=10, pady=10,
+            spacing1=2, spacing3=2 # Increase line spacing
+        )
+        self.system_edit.pack(fill="both", expand=True)
+        self.paned_window.add(self.right_pane, stretch="always")
+
+        # Bind zoom events (Ctrl + Wheel)
+        self.text_edit.bind("<Control-MouseWheel>", self._on_zoom)
+        self.system_edit.bind("<Control-MouseWheel>", self._on_zoom)
+
+        # Set initial sash position to center (50/50 split) dynamically
+        self.after(200, self._initialize_sash)
+
+        self.text_edit.configure(state="disabled")
+        self.system_edit.configure(state="disabled")
+
+    def _on_zoom(self, event):
+        # Calculate new size (Windows: event.delta is +/- 120)
+        if event.delta > 0:
+            self.console_font_size = min(self.console_font_size + 1, 30)
+        else:
+            self.console_font_size = max(self.console_font_size - 1, 6)
+        
+        # Apply to both
+        new_font = ("Consolas", self.console_font_size)
+        self.text_edit.configure(font=new_font)
+        self.system_edit.configure(font=new_font)
+        return "break" # Prevents default scrolling behavior if Ctrl is held
+
+    def _initialize_sash(self):
+        self.paned_window.update_idletasks()
+        width = self.paned_window.winfo_width()
+        if width > 1: # check if widget is mapped
+            self.paned_window.sash_place(0, width // 2, 0)
+
+
+    def _choose_path(self, entry_widget: ctk.CTkEntry):
+
+        path = filedialog.askopenfilename(
+            title="Select trace file", filetypes=[("All Files", "*")]
         )
         if path:
-            edit.setText(path)
+            entry_widget.delete(0, "end")
+            entry_widget.insert(0, path)
 
     def _on_run(self):
-        normal = self.normal_edit.text().strip()
-        slow = self.slow_edit.text().strip()
-        target_pkg = self.package_edit.text().strip()
-        model = self.model_edit.text().strip()
+        normal = self.normal_edit.get().strip()
+        slow = self.slow_edit.get().strip()
+        target_pkg = self.package_edit.get().strip()
+        model = self.model_edit.get().strip()
+        
         if not normal or not slow:
-            QtWidgets.QMessageBox.warning(
-                self, "Missing paths", "Both trace paths must be set."
-            )
+            messagebox.showwarning("Missing paths", "Both trace paths must be set.")
             return
         if not target_pkg:
-            QtWidgets.QMessageBox.warning(
-                self, "Missing package", "Target package must be set."
-            )
+            messagebox.showwarning("Missing package", "Target package must be set.")
             return
         if not model:
-            QtWidgets.QMessageBox.warning(
-                self, "Missing model", "Model name must be set."
-            )
+            messagebox.showwarning("Missing model", "Model name must be set.")
             return
 
-        self.text_edit.clear()
-        self.run_button.setEnabled(False)
-        self.thread = ExecutorThread(normal, slow, target_pkg, model)
-        self.thread.progress.connect(self._append_line)
-        self.thread.token_progress.connect(self._update_token_usage)
-        self.thread.finished.connect(self._on_finished)
+        self.status_label.configure(text="Analyzing...")
+        self.run_button.configure(state="disabled")
+        self.text_edit.configure(state="normal")
+        self.text_edit.delete("1.0", "end")
+        self.text_edit.configure(state="disabled")
+        self.system_edit.configure(state="normal")
+        self.system_edit.delete("1.0", "end")
+        self.system_edit.configure(state="disabled")
+        self.realtime_status.configure(text="") # Clear status on new run
+
+        self.thread = ExecutorThread(
+            normal,
+            slow,
+            target_pkg,
+            model,
+            progress_callback=self._append_line,
+            token_callback=self._update_token_usage,
+            finished_callback=self._on_finished,
+        )
         self.thread.start()
 
-    def _append_line(self, line: str):
-        # spinner updates: replace last line if starts with \r
+    def _append_line(self, line: str, system: bool=False):
+        # Route to AI or System based on the system flag
+        target = self.system_edit if system else self.text_edit
+        self.after(0, lambda: self._append_to_widget(target, line))
+
+    def _on_stdout_write(self, text: str):
+        # Handle stdout pieces nicely
+        self.after(0, lambda: self._append_raw(self.system_edit, text))
+
+    def _append_raw(self, widget: tk.Text, text: str):
+        widget.configure(state="normal")
+        widget.insert("end", text)
+        widget.see("end")
+        widget.configure(state="disabled")
+
+    def _append_to_widget(self, widget: tk.Text, line: str):
         if line.startswith("\r"):
-            cursor = self.text_edit.textCursor()
-            cursor.movePosition(QtGui.QTextCursor.MoveOperation.End)
-            # remove previous block (up to newline)
-            cursor.select(QtGui.QTextCursor.SelectionType.BlockUnderCursor)
-            cursor.removeSelectedText()
-            cursor.insertText(line[1:])
-        else:
-            # append full string preserving newlines
-            self.text_edit.append(line)
-            # ensure scroll
-            self.text_edit.verticalScrollBar().setValue(
-                self.text_edit.verticalScrollBar().maximum()
-            )
+            # Redirect real-time updates to the status label
+            self.realtime_status.configure(text=line[1:])
+            return
+
+        # Regular message received - clear status and append to log
+        self.realtime_status.configure(text="")
+        widget.configure(state="normal")
+        full_content = widget.get("1.0", "end-1c")
+        if full_content and not full_content.endswith("\n"):
+            widget.insert("end-1c", "\n")
+        widget.insert("end-1c", line + "\n")
+        widget.see("end")
+        widget.configure(state="disabled")
+
 
     def _on_finished(self, results: list):
-        self.run_button.setEnabled(True)
-        QtWidgets.QMessageBox.information(self, "Done", "Execution finished.")
+        self.after(
+            0,
+            lambda: [
+                self.run_button.configure(state="normal"),
+                self.status_label.configure(text="Analysis Complete"),
+                messagebox.showinfo("Done", "Execution finished."),
+            ],
+        )
 
     def _update_token_usage(self, used: int, total: int):
         pct = int(used / total * 100) if total > 0 else 0
-        self.token_label.setText(f"Tokens: {used:,} / {total:,} ({pct}%)")
-        self.token_bar.setMaximum(total)
-        # animate to new value
-        self.token_animation.stop()
-        self.token_animation.setStartValue(self.token_bar.value())
-        self.token_animation.setEndValue(used)
-        self.token_animation.start()
+        self.token_label.configure(text=f"Tokens: {used:,} / {total:,} ({pct}%)")
+        self.token_bar.set(used / total if total > 0 else 0)
 
-    # helpers for styling only
-
-    def _apply_styles(self):
-        # use a clean fusion style and light coloring
-        QtWidgets.QApplication.setStyle("Fusion")
-        palette = QtGui.QPalette()
-        palette.setColor(QtGui.QPalette.ColorRole.Window, QtGui.QColor(245, 245, 245))
-        palette.setColor(
-            QtGui.QPalette.ColorRole.WindowText, QtCore.Qt.GlobalColor.black
-        )
-        palette.setColor(QtGui.QPalette.ColorRole.Base, QtGui.QColor(255, 255, 255))
-        palette.setColor(
-            QtGui.QPalette.ColorRole.AlternateBase, QtGui.QColor(240, 240, 240)
-        )
-        palette.setColor(
-            QtGui.QPalette.ColorRole.ToolTipBase, QtCore.Qt.GlobalColor.black
-        )
-        palette.setColor(
-            QtGui.QPalette.ColorRole.ToolTipText, QtCore.Qt.GlobalColor.white
-        )
-        palette.setColor(QtGui.QPalette.ColorRole.Text, QtCore.Qt.GlobalColor.black)
-        palette.setColor(QtGui.QPalette.ColorRole.Button, QtGui.QColor(220, 220, 220))
-        palette.setColor(
-            QtGui.QPalette.ColorRole.ButtonText, QtCore.Qt.GlobalColor.black
-        )
-        palette.setColor(QtGui.QPalette.ColorRole.Highlight, QtGui.QColor(0, 120, 215))
-        palette.setColor(
-            QtGui.QPalette.ColorRole.HighlightedText, QtCore.Qt.GlobalColor.white
-        )
-        QtWidgets.QApplication.setPalette(palette)
-        # round corners for various widgets
-        sheet = """
-            QGroupBox { border: 1px solid #888; border-radius: 8px; margin-top: 6px; }
-            QGroupBox:title { subcontrol-origin: margin; subcontrol-position: top left; padding: 0 3px; }
-            QPushButton { border: 1px solid #888; border-radius: 6px; padding: 4px 12px; }
-            QPushButton:hover { background-color: #e6f2ff; }
-            QLineEdit, QTextEdit { border: 1px solid #bbb; border-radius: 6px; padding: 2px; }
-        """
-        # apply style sheet via the existing application instance
-        app = QtWidgets.QApplication.instance()
-        if app:
-            app.setStyleSheet(sheet)
+    def _on_close(self):
+        if self.thread and self.thread.is_alive():
+            self.thread.stop()
+        
+        # Restore stdout
+        if hasattr(self, 'original_stdout'):
+            sys.stdout = self.original_stdout
+        
+        self.destroy()
 
 
 if __name__ == "__main__":
-    # ensure QApplication is created before styling
-    app = QtWidgets.QApplication(sys.argv)
-    window = TraceGui()
-    window.show()
-    sys.exit(app.exec())
+    app = TraceGui()
+    app.mainloop()
+
