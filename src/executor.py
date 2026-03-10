@@ -1,5 +1,5 @@
 import json
-
+import datetime
 from detective_api import DetectiveAPI
 from ollama_manager import OllamaManager
 from prompt_values import PromptValues
@@ -9,6 +9,7 @@ class Executor:
     def __init__(self, model_name="gemma3-12b"):
         self.ollamaManager = OllamaManager(model_name=model_name)
         self.max_rounds = 8  # 최대 8라운드까지 수사 진행 (이후 강제 종결)
+        self.investigation_history = []
 
     def run(self, trace_normal, trace_slow, target_package, output_callback=None):
         def _out(msg: str="", system: bool=False):
@@ -38,6 +39,11 @@ class Executor:
 
         # Phase 1 즉시 실행
         first_scan = det_api.initial_system_scan(target_package)
+        self.investigation_history.append({
+            "step": "INITIAL_SCAN",
+            "tool": "initial_system_scan",
+            "evidence": first_scan
+        })
 
         # 2. 대화 컨텍스트 구성
         context = [
@@ -119,6 +125,12 @@ class Executor:
                         # API 실행 (마크다운 문자열 반환)
                         data_md = tool_func(**args)
                         feedback_data += f"\n{data_md}"
+                        self.investigation_history.append({
+                            "step": f"STEP {current_round}",
+                            "tool": tool_name,
+                            "evidence": data_md
+                        })
+
                         _out(f"✅ {tool_name}: 데이터 확보 완료 ({len(data_md)} bytes)", system=True)
                     except Exception as e:
                         feedback_data += f"\n❌ 실행 에러: {str(e)}"
@@ -146,130 +158,151 @@ class Executor:
 
             elif status == "complete":
                 report = result.get("report", {})
-                self._print_final_report(_out, report, final_round=current_round)
+                final_report = self._request_final_report_refinement(context, report)
+                self._print_final_report(_out, final_report, final_round=current_round)
                 return lines
 
         # 최대 라운드 초과 시 강제 요약
         _out("\n⚠️ 수사 제한 시간(Max Rounds)이 종료되었습니다. 최종 결론을 도출합니다.")
-        context.append(
-            {
-                "role": "user",
-                "content": "수사가 길어지고 있습니다. 지금까지의 $\Delta$ 데이터를 바탕으로 범인을 특정하고 최종 보고서를 작성하십시오.",
-            }
-        )
+        all_evidence_str = "\n".join([
+            f"### {h['step']} ({h['tool']}) 결과 ###\n{h['result']}" 
+            for h in self.investigation_history
+        ])
+
+        force_summary_prompt = f"""
+            [긴급] 수사 시간이 초과되었습니다. 
+            지금까지 확보된 아래의 모든 증거 데이터를 종합하여 범인을 특정하고 최종 보고서를 작성하십시오.
+
+            확보된 증거 리스트:
+            {all_evidence_str}
+
+            지침:
+            1. 확실하지 않은 경우 '추정 원인'으로 기재하되, 데이터 수치는 정확히 인용하라.
+            2. 각 STEP별 Delta 수치를 표와 함께 포함하여 analysis_detail을 작성하라.
+            """
+
+        context.append({
+            "role": "user",
+            "content": force_summary_prompt
+        })
 
         final_res = self.ollamaManager.request(
             context, format="json", chunk_callback=chunk_callback
         )
         try:
             final_result = json.loads(final_res["message"]["content"])
-            self._print_final_report(
-                _out, final_result.get("report", {}), final_round=current_round
-            )
+            report = final_result.get("report", {})
+
+            if not report.get("checked_paths"):
+                report["checked_paths"] = [h["tool"] for h in self.investigation_history]
+
+            self._print_final_report(_out, report, final_round=current_round)
         except:
             _out("❌ 최종 보고서 작성 실패.")
 
         return lines
 
+    def _request_final_report_refinement(self, context, initial_report):
+        """저장된 모든 변수(증거)를 사용하여 리포트의 analysis_detail을 풍성하게 만듭니다."""
+        all_evidence = "\n\n".join([f"[{h['step']}] {h['evidence']}" for h in self.investigation_history])
+        
+        refine_prompt = f"""
+        지금까지 수집된 모든 증거 데이터(Tables)이다:
+        {all_evidence}
+
+        이 데이터들을 바탕으로 최종 리포트의 'analysis_detail' 섹션을 작성하라. 
+        각 STEP별로 사용한 도구와 구체적인 Delta($\Delta$) 수치를 표와 함께 포함하여 매우 상세하게 작성하라.
+        """
+        # AI에게 최종 정제 요청 (간략화된 예시 로직)
+        initial_report["analysis_detail"] = self.ollamaManager.request_text(refine_prompt)
+        initial_report["checked_paths"] = [h["tool"] for h in self.investigation_history]
+        return initial_report
+
     def _print_final_report(self, _out_func, report, final_round=1):
-        # 1. AI 응답 데이터 추출 (JSON 규격 준수)
+        # 1. 데이터 추출 (AI가 생성한 JSON에서 데이터 확보)
         summary = report.get("summary", "분석 요약 정보 없음")
         root_cause = report.get("root_cause", "원인 특정 불가")
-        evidence_summary = report.get("evidence_summary", "")
+        evidence_summary = report.get("evidence_summary", "확보된 직접 증거 없음")
         analysis_detail = report.get("analysis_detail", "상세 분석 내용 없음")
-        checked_tools = report.get("checked_paths", [])  # AI가 사용한 도구 목록
+        checked_tools = report.get("checked_paths", [])
         fix_recommendation = report.get("fix_recommendation", "권장 조치 없음")
-
-        # 2. 동적 신뢰도(Confidence Score) 산출
-        score = 0
-
-        # A. 도구 다양성 (최대 40점) - 사용된 고유 도구 개수당 8점
-        unique_tools = list(set(checked_tools))
-        score += min(len(unique_tools) * 8, 40)
-
-        # B. 증거 상태 판별 (최대 30점)
-        # AI의 증거 요약에 확신을 나타내는 키워드가 있는지 검사합니다.
-        evidence_lower = evidence_summary.lower()
-        if any(
-            word in evidence_lower
-            for word in ["확보", "입증", "verified", "identified", "범인"]
-        ):
-            score += 30
-        elif any(
-            word in evidence_lower for word in ["의심", "probable", "추정", "가능성"]
-        ):
-            score += 15
-
-        # C. 수사 집요함 (최대 20점) - 5라운드 이상 수사 시 만점
-        score += min(final_round * 4, 20)
-
-        # D. 데이터 정밀도 (최대 10점) - 분석 내용의 충실도
-        if len(analysis_detail) > 100:
-            score += 10
-        elif len(analysis_detail) > 50:
-            score += 5
-
-        # 3. 점수대별 수사관 소견 매핑
-        if score >= 90:
-            trust_msg = "⚖️ [범행 확정] 결정적 증거 확보 및 수사 종결"
-        elif score >= 75:
-            trust_msg = "🔍 [유력 용의자 특정] 높은 신뢰도의 분석 결과"
-        elif score >= 60:
-            trust_msg = "🧐 [합리적 의심] 정황 근거 유효, 추가 검증 권장"
-        elif score >= 40:
-            trust_msg = "⚠️ [증거 불충분] 부분적 정황 포착, 수사 범위 확대 필요"
-        else:
-            trust_msg = "❌ [수사 난항] 데이터 부족으로 인한 낮은 신뢰도"
-
-        # 4. 시각적 요소 구성 (20칸 바)
-        filled_blocks = int((score / 100) * 20)
-        bar = "█" * filled_blocks + "░" * (20 - filled_blocks)
-        db_line = "═" * 70
-        sg_line = "─" * 70
-
-        # 5. 리포트 빌드
+        
+        # 2. 메타데이터 생성 (전문 문서 감성 추가)
+        now = datetime.datetime.now()
+        timestamp = now.strftime("%Y-%m-%d %H:%M:%S")
+        case_id = f"TD-CASE-{now.strftime('%y%m%d%H%M')}"
+        
+        # 3. 시각적 가이드라인 정의
+        db_line = "═" * 76
+        sg_line = "─" * 76
+        
         res = []
-        res.append("\n" + db_line)
-        res.append(f"       📜 [ ANDROID PERFORMANCE FORENSIC REPORT ]")
+        
+        # [A] Header Section: 공식 문서 박스 아트
+        res.append(f"\n╔{db_line}╗")
+        res.append(f"║{'PERFORMANCE FORENSIC INVESTIGATION REPORT'.center(76)}║")
+        res.append(f"╚{db_line}╝")
+        res.append(f"  [ CASE ID ]  {case_id:25} [ TIMESTAMP ]  {timestamp}")
         res.append(db_line)
 
-        res.append(f"📝 분석 요약 (Summary)")
-        res.append(f'   "{summary}"')
+        # [B] Executive Summary: 무엇이 문제인가?
+        res.append(f" 📝 [ 분석 요약 ]")
+        res.append(f"    \"{summary}\"")
         res.append("")
 
-        res.append(f"🚩 근본 원인 (Root Cause Identified)")
-        res.append(f"   ▶ {root_cause}")
+        # [C] Root Cause Identified: 범인은 누구인가?
+        res.append(f" 🚩 [ 근본 원인 특정 ]")
+        res.append(f"    ▶ {root_cause}")
         res.append("")
 
-        res.append(f"🛠️ 수사 경로 및 증거 요약")
-        res.append(
-            f"   • 사용 도구: {', '.join(checked_tools) if checked_tools else 'N/A'}"
-        )
-        res.append(f"   • 증거 데이터: {evidence_summary}")
-
+        # [D] Investigation Path: 어떤 도구를 썼는가?
+        res.append(f" 🛠️ [ 수사 경로 및 도구 ]")
+        tools_str = ", ".join(checked_tools) if checked_tools else "기본 시스템 스캔"
+        res.append(f"    • 운용 도구: {tools_str}")
+        res.append(f"    • 핵심 증거: {evidence_summary}")
         res.append(sg_line)
 
-        res.append(f"📊 상세 분석 리포트 (Analysis Detail)")
-        # 마크다운 표나 긴 텍스트를 깔끔하게 들여쓰기 처리
-        for line in analysis_detail.split("\n"):
-            if line.strip():
-                res.append(f"   {line.strip()}")
+        # [E] Deep Dive Analysis: 지휘관님이 만든 8개 API의 결과물 (By Tool)
+        res.append(f" 📊 [ 상세 부검 리포트 (By Tool) ]")
+        
+        # AI가 작성한 상세 내용을 한 줄씩 읽으며 포맷팅
+        lines = analysis_detail.split("\n")
+        for line in lines:
+            stripped = line.strip()
+            if not stripped:
+                continue
+            
+            # 1) 도구별 섹션 헤더 강조 (STEP, TOOL, API 등의 키워드 감지)
+            if any(keyword in stripped.upper() for keyword in ["STEP", "TOOL", "API", "탐지", "###"]):
+                # 기존 마크다운 샵(#) 기호 제거 후 깔끔하게 출력
+                clean_header = stripped.lstrip('#').strip()
+                res.append(f"\n    ● {clean_header}")
+                
+            # 2) 마크다운 표(Table) 보존: 파이프(|) 기호가 있으면 들여쓰기 최소화
+            elif "|" in stripped:
+                res.append(f"      {stripped}")
+                
+            # 3) 일반 분석 코멘트
+            else:
+                # 불렛 포인트가 이미 있다면 그대로 쓰고, 없다면 하이픈 추가
+                prefix = "" if stripped.startswith(("-", "*", "•")) else "- "
+                res.append(f"      {prefix}{stripped}")
+                
+        res.append("\n" + sg_line)
 
-        res.append(sg_line)
-
-        res.append(f"✅ 최종 권고 사항 (Fix Recommendation)")
+        # [F] Final Verdict: 어떻게 해결할 것인가?
+        res.append(f" ✅ [ 최종 권고 사항 ]")
         for line in fix_recommendation.split("\n"):
             if line.strip():
-                # 불렛 포인트 자동 생성
-                clean_line = line.strip().lstrip("-").lstrip("•").strip()
-                res.append(f"   ☞ {clean_line}")
+                # 불렛 포인트를 '☞' 아이콘으로 통일
+                clean_line = line.strip().lstrip("-").lstrip("•").lstrip("☞").strip()
+                res.append(f"    ☞ {clean_line}")
 
         res.append(db_line)
-
-        # 하단 신뢰도 정보 출력
-        footer = f"{trust_msg}  |  신뢰 지수: [{bar}] {score}%"
-        res.append(footer.center(70))
+        
+        # [G] Footer: 수사 종결 선언
+        footer = f"END OF INVESTIGATION - TRACEDETECTIVE v1.3"
+        res.append(footer.center(76))
         res.append(db_line + "\n")
 
-        # 6. 최종 출력
         _out_func("\n".join(res))
