@@ -83,132 +83,130 @@ class Executor:
             },
         ]
 
-        print(det_api.get_device_info())
+        while current_round <= self.max_rounds:
+            _out(f"\n🎬 [ROUND {current_round}] 수사관이 증거를 검토 중입니다...")
 
-        # while current_round <= self.max_rounds:
-        #     _out(f"\n🎬 [ROUND {current_round}] 수사관이 증거를 검토 중입니다...")
+            # AI에게 질문 (Strict JSON 모드)
+            response = self.ollamaManager.request(
+                context, format="json", chunk_callback=chunk_callback
+            )
 
-        #     # AI에게 질문 (Strict JSON 모드)
-        #     response = self.ollamaManager.request(
-        #         context, format="json", chunk_callback=chunk_callback
-        #     )
+            # 토큰 사용량 체크 (Ollama 기준)
+            total_used_token = response.get("prompt_eval_count", 0) + response.get(
+                "eval_count", 0
+            )
+            _out("\\token " + str(total_used_token))
 
-        #     # 토큰 사용량 체크 (Ollama 기준)
-        #     total_used_token = response.get("prompt_eval_count", 0) + response.get(
-        #         "eval_count", 0
-        #     )
-        #     _out("\\token " + str(total_used_token))
+            try:
+                result = json.loads(response["message"]["content"])
+            except json.JSONDecodeError:
+                _out("❌ 에러: AI가 올바른 JSON 형식을 반환하지 않았습니다.\n")
+                break
 
-        #     try:
-        #         result = json.loads(response["message"]["content"])
-        #     except json.JSONDecodeError:
-        #         _out("❌ 에러: AI가 올바른 JSON 형식을 반환하지 않았습니다.\n")
-        #         break
+            status = result.get("status", "investigating")
+            thought = result.get("thought", {})
 
-        #     status = result.get("status", "investigating")
-        #     thought = result.get("thought", {})
+            # 사고 과정 출력
+            _out(f"🧠 단계: {thought.get('phase', '알 수 없음')}")
+            _out(f"🧐 가설: {thought.get('hypothesis', '-')}")
+            _out(f"🎯 관찰: {thought.get('observation_review', '-')}")
 
-        #     # 사고 과정 출력
-        #     _out(f"🧠 단계: {thought.get('phase', '알 수 없음')}")
-        #     _out(f"🧐 가설: {thought.get('hypothesis', '-')}")
-        #     _out(f"🎯 관찰: {thought.get('observation_review', '-')}")
+            if status == "investigating":
+                tool_calls = result.get("tool_calls", [])
+                if not tool_calls:
+                    _out("⚠️ 경고: 수사관이 도구를 사용하지 않았습니다. 재요청합니다.")
+                    context.append(
+                        {
+                            "role": "user",
+                            "content": "Please invoke at least one analysis tool according to the SOP.",
+                        }
+                    )
+                    continue
 
-        #     if status == "investigating":
-        #         tool_calls = result.get("tool_calls", [])
-        #         if not tool_calls:
-        #             _out("⚠️ 경고: 수사관이 도구를 사용하지 않았습니다. 재요청합니다.")
-        #             context.append(
-        #                 {
-        #                     "role": "user",
-        #                     "content": "Please invoke at least one analysis tool according to the SOP.",
-        #                 }
-        #             )
-        #             continue
+                # SOP 준수: 여러 도구를 호출해도 첫 번째 도구만 우선 처리 (혹은 루프 처리)
+                call = tool_calls[0]
+                tool_name = call.get("tool")
+                args = call.get("args", {})
 
-        #         # SOP 준수: 여러 도구를 호출해도 첫 번째 도구만 우선 처리 (혹은 루프 처리)
-        #         call = tool_calls[0]
-        #         tool_name = call.get("tool")
-        #         args = call.get("args", {})
+                is_duplicate = any(
+                    h["tool"] == tool_name and h.get("args") == args 
+                    for h in self.investigation_history
+                )
 
-        #         is_duplicate = any(
-        #             h["tool"] == tool_name and h.get("args") == args 
-        #             for h in self.investigation_history
-        #         )
+                _out(f"🛠️ [API CALL] {tool_name}({args})", system=True)
 
-        #         _out(f"🛠️ [API CALL] {tool_name}({args})", system=True)
+                feedback_data = f"### Round {current_round} Investigation Results ###\n"
+                if is_duplicate:
+                    _out(f"🚫 [중복 차단] {tool_name}({args}) 중복 호출", system=True)
+                    data_md = f"[SYSTEM] Redundant call: {tool_name}({args}). Path already explored. PIVOT per **Coverage Rule**."
+                    feedback_data += f"\n{data_md}"
 
-        #         feedback_data = f"### Round {current_round} Investigation Results ###\n"
-        #         if is_duplicate:
-        #             _out(f"🚫 [중복 차단] {tool_name}({args}) 중복 호출", system=True)
-        #             data_md = f"[SYSTEM] Redundant call: {tool_name}({args}). Path already explored. PIVOT per **Coverage Rule**."
-        #             feedback_data += f"\n{data_md}"
+                elif hasattr(det_api, tool_name):
+                    tool_func = getattr(det_api, tool_name)
+                    try:
+                        data_md = tool_func(**args)
+                        feedback_data += f"\n{data_md}"
 
-        #         elif hasattr(det_api, tool_name):
-        #             tool_func = getattr(det_api, tool_name)
-        #             try:
-        #                 data_md = tool_func(**args)
-        #                 feedback_data += f"\n{data_md}"
+                        # 지분율 변화가 거의 없는지 체크 (0.1% 미만 차이)
+                        current_coverage = self._extract_coverage(data_md)
+                        if abs(current_coverage - last_coverage) < 0.1:
+                            stagnation_count += 1
+                        else:
+                            stagnation_count = 0
+                        last_coverage = current_coverage
 
-        #                 # 지분율 변화가 거의 없는지 체크 (0.1% 미만 차이)
-        #                 current_coverage = self._extract_coverage(data_md)
-        #                 if abs(current_coverage - last_coverage) < 0.1:
-        #                     stagnation_count += 1
-        #                 else:
-        #                     stagnation_count = 0
-        #                 last_coverage = current_coverage
+                        # 2회 연속 정체 시 AI에게 강력한 피벗 압박 추가
+                        if stagnation_count >= 2:
+                            _out("⚠️ 분석 정체 감지: 가설 전환 유도", system=True)
+                            feedback_data += f"\n[SYSTEM] Warning: Coverage stalled at {current_coverage}%. DEAD-END detected. Change your hypothesis NOW."
 
-        #                 # 2회 연속 정체 시 AI에게 강력한 피벗 압박 추가
-        #                 if stagnation_count >= 2:
-        #                     _out("⚠️ 분석 정체 감지: 가설 전환 유도", system=True)
-        #                     feedback_data += f"\n[SYSTEM] Warning: Coverage stalled at {current_coverage}%. DEAD-END detected. Change your hypothesis NOW."
+                        self.investigation_history.append(
+                            {
+                                "step": f"STEP {current_round}",
+                                "tool": tool_name,
+                                "args": args,
+                                "evidence": data_md
+                            }
+                        )
+                        _out(
+                            f"✅ {tool_name}: 데이터 확보 완료 ({len(data_md)} bytes)",
+                            system=True,
+                        )
+                    except Exception as e:
+                        feedback_data += f"\n❌ Execution Error: {str(e)}"
+                        _out(f"❌ {tool_name} 실행 오류: {str(e)}", system=True)
+                else:
+                    feedback_data += (
+                        f"\n❌ Error: {tool_name} is an unknown or invalid tool."
+                    )
+                    _out(f"⚠️ 존재하지 않는 도구 호출 시도: {tool_name}", system=True)
 
-        #                 self.investigation_history.append(
-        #                     {
-        #                         "step": f"STEP {current_round}",
-        #                         "tool": tool_name,
-        #                         "args": args,
-        #                         "evidence": data_md
-        #                     }
-        #                 )
-        #                 _out(
-        #                     f"✅ {tool_name}: 데이터 확보 완료 ({len(data_md)} bytes)",
-        #                     system=True,
-        #                 )
-        #             except Exception as e:
-        #                 feedback_data += f"\n❌ Execution Error: {str(e)}"
-        #                 _out(f"❌ {tool_name} 실행 오류: {str(e)}", system=True)
-        #         else:
-        #             feedback_data += (
-        #                 f"\n❌ Error: {tool_name} is an unknown or invalid tool."
-        #             )
-        #             _out(f"⚠️ 존재하지 않는 도구 호출 시도: {tool_name}", system=True)
+                # 컨텍스트 업데이트
+                context.append(
+                    {
+                        "role": "assistant",
+                        "content": json.dumps(result, ensure_ascii=False),
+                    }
+                )
+                context.append(
+                    {
+                        "role": "user",
+                        "content": f"{feedback_data}\n\nAnalyze based on the **Coverage Rule**/SOP and decide the next step.",
+                    }
+                )
+                current_round += 1
 
-        #         # 컨텍스트 업데이트
-        #         context.append(
-        #             {
-        #                 "role": "assistant",
-        #                 "content": json.dumps(result, ensure_ascii=False),
-        #             }
-        #         )
-        #         context.append(
-        #             {
-        #                 "role": "user",
-        #                 "content": f"{feedback_data}\n\nAnalyze based on the **Coverage Rule**/SOP and decide the next step.",
-        #             }
-        #         )
-        #         current_round += 1
+            elif status == "complete" or (current_round == self.max_rounds):
+                report = result.get("report", {})
 
-        #     elif status == "complete" or (current_round == self.max_rounds):
-        #         report = result.get("report", {})
-
-        #         if status == "complete":
-        #             final_status = report.get("status", "complete")
-        #         else:
-        #             final_status = report.get("status", "unresolved")
-        #         report["status"] = final_status
-        #         final_report = self._request_final_report_refinement(context, report)
-        #         self._print_final_report(_out, final_report, final_round=current_round)
-        #         return lines
+                if status == "complete":
+                    final_status = report.get("status", "complete")
+                else:
+                    final_status = report.get("status", "unresolved")
+                report["status"] = final_status
+                final_report = self._request_final_report_refinement(context, report)
+                self._print_final_report(_out, final_report, final_round=current_round)
+                return lines
 
         return lines
 

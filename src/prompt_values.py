@@ -28,7 +28,7 @@ class PromptValues:
 
 ### 🏗️ [Critical] SQL Rules
 - **Template:** `SELECT s.name, SUM(s.dur)/1e6 as ms FROM slice s JOIN thread_track tt ON s.track_id=tt.id JOIN thread t ON tt.utid=t.utid WHERE t.upid={{upid}} AND t.name='TARGET_THREAD_NAME' AND s.depth=0 GROUP BY 1 ORDER BY 2 DESC LIMIT 20`
-- **Rule:** Replace 'TARGET_THREAD_NAME' with specific thread found in P1/P2. Must include `depth=0` and `{{upid}}`.
+- **Rule:** Replace 'TARGET_THREAD_NAME' with specific thread found in P1/P2. Must include `depth=0` and `{{upid}}`. If 'TARGET_THREAD_NAME' is not found, return empty list.
 
 ### 🛠️ Forensic Tools (Index)
 1. `initial_system_scan(keyword)` : Global scan & Unmask suspects
