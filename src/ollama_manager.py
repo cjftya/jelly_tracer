@@ -1,29 +1,37 @@
 import os
 import subprocess
 import time
+import signal
 
+import platform
 from ollama import Client
 
 
 class OllamaManager:
-
-    def __init__(self, model_name):
-        self.__model_name = model_name
-
-        self._start_optimized_engine()
-
+    def __init__(self):
+        self.__process = None 
+        self.os_type = platform.system()
+        
         self.__options = {
-            "num_ctx": 16384,          # 수사 기록 유지를 위한 16k 확보
-            "num_gpu": 99,             # VRAM(4~6GB)을 꽉 채우고 나머지는 시스템 RAM으로 오프로드
-            "num_thread": 8,           # CPU 추론 비중이 높으므로 코어 활용 극대화
-            "temperature": 0,          # 데이터 수치에 대한 엄격한 해석 (냉철함)
-            "top_p": 0.9,              # 논리적 일관성 유지
-            "repeat_penalty": 1.1,     # 무의미한 루프 방지
-            "num_predict": 4096,       # [추가] 상세 보고서 작성을 위한 출력 길이 확보
-            "mirostat": 0,             # 예측 불가능성 제거 (안정성)
-            "low_vram": False,         # 적극적인 GPU 활용 모드
+            "num_ctx": 24576,
+            "num_gpu": 8,     
+            "num_thread": 12, 
+            "temperature": 0,
+            "top_p": 0.9,
+            "repeat_penalty": 1.1,
+            "num_predict": 2048,
+            "mirostat": 0,
+            "low_vram": True,
+            "main_gpu": 0,
         }
-        None
+
+    def get_installed_models(self):
+        client = Client(host="http://127.0.0.1:11434")
+        response = client.list()
+        return [model.model for model in response.models]
+
+    def set_model_name(self, model_name):
+        self.__model_name = model_name
 
     def get_context_size(self):
         return self.__options.get("num_ctx", 0)
@@ -36,7 +44,7 @@ class OllamaManager:
             format=format,
             options=self.__options,
             stream=True,
-            keep_alive=False,
+            keep_alive=0,
         )
 
         full_response = {"message": {"content": ""}}
@@ -54,28 +62,55 @@ class OllamaManager:
 
         return full_response
 
-    def _start_optimized_engine(self):
-        print("🚀 기존 Ollama 세션을 정리증...")
-        subprocess.run(
-            ["taskkill", "/F", "/IM", "ollama.exe"], capture_output=True, text=True
+    def request_text(self, prompt: str):
+        client = Client(host="http://127.0.0.1:11434")
+        response = client.generate(
+            model=self.__model_name,
+            prompt=prompt,
+            options=self.__options,
+            keep_alive=0,
+        )
+        return response.get("response", "")
+
+    def start_engine(self):
+        self.stop_engine() 
+        
+        print("🚀 LLM 분석 환경 설정중...")
+        forensic_env = os.environ.copy()
+        forensic_env["OLLAMA_FLASH_ATTENTION"] = "1"
+        forensic_env["OLLAMA_KV_CACHE_TYPE"] = "q4_0"
+        forensic_env["OLLAMA_NUM_PARALLEL"] = "1"
+        forensic_env["OLLAMA_MAX_LOADED_MODELS"] = "1"
+        forensic_env["GGML_CUDA_ENABLE_UNIFIED_MEMORY"] = "1"
+        forensic_env["CUDA_MODULE_LOADING"] = "LAZY"
+
+        self.__process = subprocess.Popen(
+            ["ollama", "serve"],
+            env=forensic_env,
+            creationflags=subprocess.CREATE_NO_WINDOW,
         )
         time.sleep(5)
         print("✅ 완료")
 
-
-        print("🚀 전용 환경을 활성화 설정중...")
-        forensic_env = os.environ.copy()
-        forensic_env["OLLAMA_FLASH_ATTENTION"] = "1"  # 연산 가속
-        forensic_env["OLLAMA_KV_CACHE_TYPE"] = "q4_0"  # 기억 장치 압축 (VRAM 절약 핵심)
-        forensic_env["OLLAMA_NUM_PARALLEL"] = "1"  # 자원 독점
-        forensic_env["OLLAMA_MAX_LOADED_MODELS"] = "1"  # 메모리 혼선 방지
-        forensic_env["GGML_CUDA_ENABLE_UNIFIED_MEMORY"] = "1"
-        forensic_env["CUDA_MODULE_LOADING"] = "LAZY"
-
-        subprocess.Popen(
-            ["ollama", "serve"],
-            env=forensic_env,
-            creationflags=subprocess.CREATE_NO_WINDOW,  # 창 없이 조용히 실행
-        )
-        time.sleep(5)
+    def stop_engine(self):
+        print("🚀 LLM 세션 정리중...")
+        
+        if self.__process:
+            self.__process.terminate()
+            self.__process.wait()
+            self.__process = None
+        
+        if self.os_type == "Windows":
+            subprocess.run(
+                ["taskkill", "/F", "/IM", "ollama.exe"], 
+                capture_output=True, 
+                text=True
+            )
+        else:
+            subprocess.run(
+                ["pkill", "-f", "ollama"],
+                capture_output=True,
+                text=True
+            )
+    
         print("✅ 완료")

@@ -12,106 +12,135 @@
 
 ```
 
-# 🕵️‍♂️ TraceDetectiveAndroid (v1.3) : The Forensic Expert
-
-> **"Data never lies. The culprit is in the traces."**
-> AI 에이전트 기반의 Android 성능 포렌식 및 병목 자동 분석 솔루션
-
-`TraceDetectiveAndroid`는 Perfetto 트레이스 데이터를 기반으로 앱의 지연 현상(Jank/Lag)을 추적하는 **자율형 분석 에이전트**입니다. 단순히 데이터를 시각화하는 것을 넘어, AI가 직접 DB에 질의하고 가설을 검증하며 엔지니어에게 '정답에 가까운 통찰'을 제공합니다.
+# 🕵️‍♂️ TraceDetectiveAndroid v1.32 (Titanium Edition)
+"From Intuition to Mathematical Validation"
+TraceDetectiveAndroid는 성능 저하(Regression)의 원인을 직관이 아닌 수치로 증명하기 위해 설계된 자동화 분석 에이전트입니다.
 
 ---
 
-## 🚀 Core Capabilities
-
-### 1. 🧬 Delta-Driven Investigation
-성능 이슈의 본질인 '회귀(Regression)'를 타격하기 위해 **정상(Normal) vs 지연(Slow)** 구간의 데이터를 수학적으로 대조합니다.
-* **$ΔT = T_{slow} - T_{normal}$**: 변화가 발생한 지점만을 필터링하여 분석 노이즈를 근본적으로 차단합니다.
-
-### 2. ⚖️ Autonomous Decision Routing (50% Rule)
-분석 중 확보된 데이터의 분포에 따라 AI가 다음 수사 경로를 스스로 결정합니다.
-* **Workload 분석**: 특정 함수의 점유율이 낮을 경우, 내부 로직이 아닌 시스템 간섭(Binder, CPU Scheduling, Lock)으로 수사망을 자동 전환하여 분석의 유효성을 높입니다.
-
-### 3. 🛡️ Robust Query Abstraction (Golden Path)
-Perfetto의 복잡한 SQL 스키마에서 발생할 수 있는 휴먼 에러와 AI 환각을 방지하기 위해 **검증된 조인 경로(Golden Join Path)**를 표준화했습니다. 쿼리 실패 시 에러 메시지를 분석하여 스스로 코드를 수정하는 Self-Correction 메커니즘이 포함되어 있습니다.
-
-### 4. 📉 Efficient Context Diet
-제한된 컨텍스트 윈도우(16k) 내에서 장기 수사를 진행하기 위해 **Sliding Window 기반의 데이터 압축 기술**을 적용했습니다. 불필요한 과거 데이터를 요약본으로 대체하여 최신 추론의 정밀도를 유지합니다.
+## 📌 Project Concept
+성능 분석은 방대한 데이터 속에서 유의미한 원인을 찾아내는 고도의 집중력이 필요한 작업입니다. TraceDetectiveAndroid는 서로 다른 두 시점의 시스템 트레이스(Normal vs Slow)를 대조 분석하여 성능 회귀의 지배적인 원인을 자율적으로 탐색합니다. 단순한 데이터 시각화를 넘어, 유의미한 지연 시간의 변화량($\Delta$)을 계산하고 전체 지연에 대한 기여도를 산출하는 **Decision-making Framework**를 제공합니다.
 
 ---
 
-## 🛠️ The Elite Eight (Analytic Tools)
+## 🌟 Key Value Propositions
 
-성능 분석을 위해 AI 에이전트가 전략적으로 운용하는 8가지 핵심 모듈입니다.
+### 1. Zero-Noise Differential Analysis
+기존 프로파일링 방식은 '절대적인 실행 시간'에 매몰되기 쉽습니다. TraceDetectiveAndroid는 **Differential(차분) 분석**을 기본 원칙으로 삼아, 시스템 백그라운드 노이즈를 제거하고 오직 이번 회귀(Regression)를 유발한 순수 변동량만을 추적합니다.
 
-* **System Scanner**: 전역 CPU 점유율 및 병목 발화점 식별
-* **Process Tracker**: 프로세스 간 리소스 경합 및 타 프로세스 간섭 수사
-* **Binder Inspector**: IPC(Binder) 통신 지연 및 시스템 서비스 응답성 분석
-* **Kernel Profiler**: Thread State(Running/Runnable/Sleep) 분석을 통한 스케줄링 이슈 확인
-* **Lock Detective**: Java/Native 영역의 모니터 경합 및 소유권(Ownership) 추적
-* **Memory Monitor**: GC 오버헤드 및 대용량 힙 할당 패턴 분석
-* **Function Auditor**: 특정 스레드 내부 함수의 실행 시간 정밀 부검
-* **Custom SQL Agent**: 복합 이슈 해결을 위한 자율적 SQL 질의 및 데이터 가공
+### 2. Evidence-Based Decision Making
+"느려진 것 같다"는 추측성 보고를 지양합니다. 모든 분석 단계에서 **Latency Coverage** 지표를 산출하여, 식별된 원인이 전체 문제의 몇 퍼센트를 설명하는지 수학적으로 제시합니다. 이는 분석 결과의 객관성을 확보하고 후속 최적화 작업의 우선순위를 결정하는 기준이 됩니다.
+
+### 3. Engineering Resource Optimization
+엔지니어가 수천 개의 트레이스 슬라이스를 일일이 대조하는 반복적이고 소모적인 작업을 AI 에이전트가 대신 수행합니다. SOP가 코드화되어 있어, 주니어부터 시니어까지 일관되고 높은 수준의 분석 품질을 유지할 수 있습니다.
+
+### 4. Self-Correcting Analytical Logic
+분석 과정에서 가설이 데이터와 일치하지 않거나 진척도가 정체될 경우, 시스템이 이를 스스로 감지하고 분석 경로를 변경(Pivot)합니다. 이러한 **자가 교정 루프**는 분석의 막다른 길(Dead-end)에서 낭비되는 시간을 최소화합니다.
+
+---
+
+## 🏗️ Core Architecture Components
+
+* **Differential Analysis API**: SQL 기반의 정밀 데이터 추출 및 계층 구조 중복 합산 방지 로직 탑재.
+* **Autonomous Reasoning Executor**: 분석 진척도 기반의 실시간 경로 제어 및 피드백 루프 관리.
+* **Metric-Driven SOP**: 안드로이드 스레드 상태 모델에 최적화된 표준 분석 절차 자동화.
+
+---
+
+## 📊 Key Evaluation Metrics
+* **Local Δ**: 특정 컴포넌트나 함수 구간에서 발생한 순수 지연 시간의 변화량입니다.
+* **Latency Coverage**: 식별된 원인이 전체 Regression에서 차지하는 지분율입니다. (증명된 지연 시간 / 전체 지연 시간)
+* **Insight Status**: `⚪ STABLE`, `🔴 INC`, `🟢 DEC` 지표를 통해 분석 대상의 상태를 즉각적으로 판별합니다.
+
+---
+
+## 📑 Analytical Report Output
+분석 프로세스가 종료되면 **Forensic Analysis Report**를 자동 생성합니다. 이 보고서는 단계별 분석 데이터와 LaTeX 수식을 활용한 수학적 증명 과정을 포함하여, 엔지니어가 즉시 Action-item을 도출할 수 있는 전문적인 인사이트를 제공합니다.
 
 ---
 
 ## 📜 Forensic Report Sample
 
 ```text
-══════════════════════════════════════════════════════════════════════
-       📜 [ ANDROID PERFORMANCE FORENSIC REPORT : v1.3 ]
-══════════════════════════════════════════════════════════════════════
-📝 분석 요약 (Summary)
-   "Portrait 모드 촬영 시 PortraitProc 스레드에서 약 120ms의 프레임 드랍 발생"
+╔══════════════════════════════════════════════════════════════════════════════╗
+║                   PERFORMANCE FORENSIC INVESTIGATION REPORT                  ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+  [ CASE ID ]  TD-CASE-2603130352         [ TIMESTAMP ]  2026-03-13 03:52:10
+════════════════════════════════════════════════════════════════════════════════
+ 📝 [ EXECUTIVE SUMMARY ]
+    "reportFullyDrawn 지점이 Baseline 대비 14.7s 지연됨. 기기 환경은 동일하며, 
+     특정 스레드의 CPU 점유율이 80% 이상을 차지하는 비정상 패턴 탐지."
 
-🚩 근본 원인 (Root Cause Identified)
-   ▶ 카메라 프로바이더(ISP)로부터의 데이터 수신 Binder Transaction 지연 (+98.50ms)
+ 🚩 ✅ [ ANALYSIS CERTIFIED ]
+    ▶ Data Accounting : 🟢 VERIFIED (수학적 증명 완료)
+    ▶ Latency Coverage    : 94.2% (High Confidence)
 
-🛠️ 수사 경로 및 증거 요약
-   • 사용 도구: initial_system_scan, check_thread_scheduling, trace_binder_calls
-   • 증거 데이터: 스레드 상태가 Sleeping으로 급증했으며, Binder 호출 시간과 99% 일치.
-──────────────────────────────────────────────────────────────────────
-📊 상세 분석 데이터 (Analysis Detail)
-   | Rank | Name | Delta | Ratio | Status |
-   | :--- | :--- | :--- | :--- | :--- |
-   | 1 | Binder:camera_provider | +98.50ms | 81.7% | 🔴 INC |
-   | 2 | PD_Disparity_Calc | +15.20ms | 12.6% | 🔴 INC |
-──────────────────────────────────────────────────────────────────────
-✅ 최종 권고 사항 (Fix Recommendation)
-   ☞ ISP 서비스 측의 버퍼 관리 로직 및 데드락 가능성 조사를 요청하십시오.
-   ☞ 해당 Binder 호출을 메인 루프에서 분리하여 비동기 처리할 것을 권고합니다.
-══════════════════════════════════════════════════════════════════════
-      ⚖️ [범행 확정] 결정적 증거 확보  |  신뢰 지수: [██████████████████░░] 92%
-══════════════════════════════════════════════════════════════════════
+ 🎯 [ ROOT CAUSE IDENTIFIED ]
+    ▶ [MainThread] 내 중복된 XML 뷰 인플레이션 및 복잡한 레이아웃 중첩 발생
+
+ 📱 [ DEVICE ENVIRONMENT CONTEXT ]
+    | Metric     | Normal (Baseline)    | Slow (Target)        | Status    |
+    |------------|----------------------|----------------------|-----------|
+    | Avg CPU    | 1475 MHz             | 1475 MHz             | ✅ Stable |
+    | Load       | 99.6%                | 99.6%                | 🔥 Heavy  |
+    | Core       | Big                  | Big                  | ✅ Same   |
+
+    [ 용어 해설 ]
+    • Avg CPU: 평균 동작 속도 (단위: MHz) - 낮을수록 기기 발열로 인한 성능 제한 상태
+    • Load: 시스템 과부하 (단위: %) - 높을수록 다른 앱의 간섭으로 인해 실행이 지연됨
+    • Core: 핵심 코어 배정 (Big/Little) - 고성능(Big) 혹은 저전력(Little) 코어 사용 여부
+
+ 🛠️ [ INVESTIGATION PATH ]
+    • Tools Used    : Milestone Scan, CPU Delta Tracer, Device Context API
+    • Key Evidence  : MainThread CPU 사용 지분 84.6% 탐지
+──────────────────────────────────────────────────────────────────────────────
+ 📊 [ FORENSIC ANALYSIS DETAIL ]
+
+    ● Milestone Delta
+      - bindApplication: +12.40ms | ✅ OK
+      - activityStart: +45.20ms | 🚨 REGRESSION
+      - reportFullyDrawn: +14723.18ms | 🚨 REGRESSION
+
+    ● Thread CPU Delta (Total Δ: +14710.45ms)
+      📌 Latency Coverage: 94.2%
+      - (MainThread): +12450.20ms | 84.6% | 🔴 INC
+      - (RenderThread): +1240.15ms | 8.4% | 🔴 INC
+
+──────────────────────────────────────────────────────────────────────────────
+ ✅ [ RECOMMENDATIONS ]
+    ☞ 메인 스레드에서 수행 중인 뷰 생성 로직을 Background Thread로 분산
+    ☞ 레이아웃 계층을 단순화하여 렌더링 시 발생하는 중복 연산 제거
+
+════════════════════════════════════════════════════════════════════════════════
+                END OF INVESTIGATION - TRACEDETECTIVE v1.32                
+════════════════════════════════════════════════════════════════════════════════
 
 ```
 
 ---
 
-## 🏗️ Architecture & Forensic Env
+## 📅 Roadmap
 
-### ⚙️ Optimization & Environment
-* **Q4 KV Cache & Flash Attention**: 컨텍스트 확장 시 메모리 점유 최적화
-* **GGML Unified Memory**: RTX 3050/4050 등 저사양 GPU에서의 12B 모델 안정 구동 지원
+### 🛠 Local Optimization
+- [ ] **Quantization Tuning**: GGUF/AWQ 등 로컬 환경에 최적화된 양자화 모델 지원 (Llama-3-8B-q4_K_M 등).
+- [ ] **Context Window Management**: 저사양 환경을 위한 Sliding Window 및 Evidence Summarization 로직 도입.
+- [ ] **Cross-Platform**: Windows 및 Linux 환경 완전 호환 지원.
 
-### 💻 Software Stack
-* **Language:** Python 3.10+
-* **AI Engine:** Google Gemma 3
-* **Runtime:** Ollama (Custom Forensic Optimization)
-* **Trace Engine:** Google Perfetto Trace Processor
+### 📈 Performance & Utility
+- [ ] **Lazy Loading System**: 대용량 트레이스 로드 시 필요한 슬라이스만 메모리에 올리는 최적화.
+- [ ] **Local Metadata DB**: 분석 결과 및 성능 이력을 외부 서버 없이 로컬 SQLite에 누적 관리.
+- [ ] **Pre-defined SQL Library**: 안드로이드 고유 지연 패턴(Binder, Lock, Scheduler)에 최적화된 로컬 전용 쿼리셋 확장.
 
----
-
-## 📅 Roadmap (Future Vision)
-
-- [ ] **Multi-Model Support**: Gemma 3 외에 Llama 3.x, Mistral 계열 최적화 지원.
-- [ ] **Support Linux**: Linux 환경 지원.
+### 🤖 Accessibility
+- [ ] **Hardware-Adaptive Presets**: PC 사양에 따른 분석 모드(Deep vs Lite) 자동 전환 기능.
+- [ ] **Local Web UI (Optional)**: 터미널 외에 로컬 브라우저에서 분석 과정을 모니터링할 수 있는 가벼운 대시보드.
 
 ---
 
 ## 👥 Contributors
 
-- **cjftya**: Android Performance Forensic Expert & Lead Architect
+- **cjftya**: AI-Driven Performance Forensic Expert & Lead Architect
 
 ---
 
-*Documentation generated by TraceDetectiveAndroid v1.3*
+*Documentation generated by TraceDetectiveAndroid v1.32*

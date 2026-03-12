@@ -19,7 +19,6 @@ class TraceServerManager:
         configs = [(9001, self.trace_n), (9002, self.trace_s)]
 
         for port, trace in configs:
-            # choose processor executable location depending on OS
             if self.os_type == "Windows":
                 exe_path = os.path.join(
                     os.path.dirname(__file__),
@@ -28,11 +27,9 @@ class TraceServerManager:
                     "trace_processor_shell.exe",
                 )
             else:
-                # assume Linux for now; can be extended for Mac if needed
                 exe_path = os.path.join(
                     os.path.dirname(__file__), "trace_server", "trace_processor"
                 )
-            # ensure executable form is correct for subprocess
             cmd = f"{exe_path} --httpd {trace} --http-port {port}"
             proc = subprocess.Popen(
                 cmd.split(), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
@@ -43,7 +40,8 @@ class TraceServerManager:
         print("✅ 완료")
 
     def stop_servers(self):
-        print(f"🚿 서버 소켓 반납 중...{len(self.procs)}개")
-        for proc in self.procs:
-            proc.terminate()
-        print("✅ 완료")
+        if self.procs:
+            print(f"🚿 Trace 세션 정리중... {len(self.procs)}개")
+            for proc in self.procs:
+                proc.terminate()
+            print("✅ 완료")
