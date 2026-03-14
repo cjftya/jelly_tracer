@@ -24,6 +24,9 @@ class DetectiveAPI:
         self.analysis_start_s = 0
         self.analysis_end_s = 0
 
+        self.utid_n = None
+        self.utid_s = None
+
     def _get_upid(self, tp):
         # 1단계: [신규] 패키지 리스트 지도로 UID부터 확보 (가장 정확)
         try:

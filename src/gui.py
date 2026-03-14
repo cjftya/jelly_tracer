@@ -2,12 +2,13 @@ import atexit
 import io
 import sys
 import threading
+import time
 import tkinter as tk
 from tkinter import filedialog, messagebox
 
 import customtkinter as ctk
 
-from executor import Executor
+from engine import Engine
 
 
 class ConsoleRedirector:
@@ -33,7 +34,7 @@ class ExecutorThread(threading.Thread):
         slow_path: str,
         target_package: str,
         model_name: str = "gemma3-12b",
-        executor: Executor = None,
+        engine: Engine = None,
         progress_callback=None,
         token_callback=None,
         finished_callback=None,
@@ -43,7 +44,7 @@ class ExecutorThread(threading.Thread):
         self.slow_path = slow_path
         self.target_package = target_package
         self.model_name = model_name
-        self.executor = executor
+        self.engine = engine
         self.progress_callback = progress_callback
         self.token_callback = token_callback
         self.finished_callback = finished_callback
@@ -68,15 +69,16 @@ class ExecutorThread(threading.Thread):
         try:
             try:
                 # self.executor.start() 는 이제 GUI 시작 시 한 번만 실행됨
-                self.token_total = self.executor.ollamaManager.get_context_size()
+                self.token_total = self.engine.ollamaManager.get_context_size()
             except Exception:
                 self.token_total = 0
-            self.executor.run(
+            
+            self.engine.start(output_callback=cb)
+            self.engine.run(
                 self.normal_path,
                 self.slow_path,
                 self.target_package,
                 model_name=self.model_name,
-                output_callback=cb,
             )
         finally:
             pass
@@ -104,7 +106,7 @@ class TraceGui(ctk.CTk):
         ctk.set_default_color_theme("blue")
 
         self.thread: ExecutorThread | None = None
-        self.executor = Executor()
+        self.engine = Engine()
         self.console_font_size = 10
 
         # Configure Grid
@@ -119,11 +121,13 @@ class TraceGui(ctk.CTk):
         threading.Thread(target=self._initialize_executor, daemon=True).start()
 
     def _initialize_executor(self):
-        self.executor.start()
+        time.sleep(3)
+
+        self.engine.start()
         
         # 설치된 모델 목록 가져와서 콤보박스 업데이트
         try:
-            models = self.executor.ollamaManager.get_installed_models()
+            models = self.engine.ollamaManager.get_installed_models()
             if models:
                 self.after(0, lambda: self.model_combo.configure(values=models))
                 # 현재 선택된 모델이 목록에 있으면 유지, 없으면 첫 번째 모델 선택
@@ -461,7 +465,7 @@ class TraceGui(ctk.CTk):
             slow,
             target_pkg,
             model,
-            executor=self.executor,
+            engine=self.engine,
             progress_callback=self._append_line,
             token_callback=self._update_token_usage,
             finished_callback=self._on_finished,
@@ -519,8 +523,8 @@ class TraceGui(ctk.CTk):
         if self.thread and self.thread.is_alive():
             self.thread.stop()
         
-        if self.executor:
-            self.executor.stop()
+        if self.engine:
+            self.engine.stop()
 
         # Restore stdout
         if hasattr(self, "original_stdout"):

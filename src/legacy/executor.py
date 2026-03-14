@@ -4,35 +4,20 @@ import json
 from detective_api import DetectiveAPI
 from ollama_manager import OllamaManager
 from prompt_values import PromptValues
-from trace_server_manager import TraceServerManager
-
 
 class Executor:
-    def __init__(self):
-        self.ollamaManager = None
-        self.server_manager = None
+    def __init__(self, ollamaManager: OllamaManager):
+        self.ollamaManager = ollamaManager
         self.max_rounds = 8
         self.investigation_history = []
 
     def start(self):
-        if self.ollamaManager is None:
-            self.ollamaManager = OllamaManager()
-            self.ollamaManager.start_engine()
-        if self.server_manager is None:
-            self.server_manager = TraceServerManager()
+        pass
 
     def stop(self):
-        if self.ollamaManager:
-            self.ollamaManager.stop_engine()
-        if self.server_manager:
-            self.server_manager.stop_servers()
+        self.ollamaManager = None
 
-    def run(self, trace_normal, trace_slow, target_package, model_name=None, output_callback=None):
-        if model_name:
-            self.ollamaManager.set_model_name(model_name)
-        self.server_manager.stop_servers()
-        self.server_manager.start_servers(trace_normal, trace_slow)
-
+    def run(self, target_package, output_callback=None):
         def _out(msg: str = "", system: bool = False):
             if output_callback:
                 output_callback(msg, system)

@@ -14,15 +14,13 @@ class OllamaManager:
         
         self.__options = {
             "num_ctx": 24576,
-            "num_gpu": 8,     
             "num_thread": 12, 
             "temperature": 0,
             "top_p": 0.9,
             "repeat_penalty": 1.1,
             "num_predict": 2048,
             "mirostat": 0,
-            "low_vram": True,
-            "main_gpu": 0,
+            "low_vram": True
         }
 
     def get_installed_models(self):
@@ -81,8 +79,6 @@ class OllamaManager:
         forensic_env["OLLAMA_KV_CACHE_TYPE"] = "q4_0"
         forensic_env["OLLAMA_NUM_PARALLEL"] = "1"
         forensic_env["OLLAMA_MAX_LOADED_MODELS"] = "1"
-        forensic_env["GGML_CUDA_ENABLE_UNIFIED_MEMORY"] = "1"
-        forensic_env["CUDA_MODULE_LOADING"] = "LAZY"
 
         self.__process = subprocess.Popen(
             ["ollama", "serve"],
