@@ -1,7 +1,7 @@
 import re
 from datetime import datetime
-from src.fusion_data_delegate import FusionDataDelegate
-from src.fusion_ai_delegate import FusionAIDelegate
+from fusion_data_delegate import FusionDataDelegate
+from fusion_ai_delegate import FusionAIDelegate
 
 class FusionCoreEngine:
     def __init__(self):

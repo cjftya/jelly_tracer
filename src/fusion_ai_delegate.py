@@ -1,5 +1,5 @@
 import re
-from src.prompt_values import PromptValues
+from prompt_values import PromptValues
 from ollama_manager import OllamaManager
 
 class FusionAIDelegate:

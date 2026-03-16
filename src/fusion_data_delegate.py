@@ -1,6 +1,6 @@
 import pandas as pd
 import numpy as np
-from src.common_api import CommonAPI
+from common_api import CommonAPI
 
 class FusionDataDelegate:
     def __init__(self, output_callback):
