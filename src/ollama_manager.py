@@ -14,7 +14,6 @@ class OllamaManager:
         
         self.__options = {
             "num_ctx": 24576,
-            "num_thread": 12, 
             "temperature": 0,
             "top_p": 0.9,
             "repeat_penalty": 1.1,

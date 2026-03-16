@@ -55,33 +55,7 @@ class CommonAPI:
 
         return None
 
-    def generate_contrast_fusion_block(self, utid_n, ts_n, utid_s, ts_s):
-        def fetch_data(tp, utid, start, end):
-            # 1. State 추출
-            s_df = tp.query(f"SELECT state, SUM(dur)/1e6 as ms FROM thread_state WHERE utid={utid} AND ts BETWEEN {start} AND {end} GROUP BY 1").as_pandas_dataframe()
-            s_map = {row['state']: int(row['ms']) for _, row in s_df.iterrows()}
-            
-            # 2. Top Slices 추출
-            l_df = tp.query(f"SELECT name, SUM(dur)/1e6 as ms FROM slice WHERE track_id=(SELECT id FROM thread_track WHERE utid={utid}) AND ts BETWEEN {start} AND {end} AND parent_id IS NULL GROUP BY 1 ORDER BY 2 DESC LIMIT 3").as_pandas_dataframe()
-            l_str = ",".join([f"{row['name'][:8]}{int(row['ms'])}" for _, row in l_df.iterrows()])
-            
-            # 3. System Load 추출
-            c_res = tp.query(f"SELECT (SUM(dur)*100.0 / ((SELECT MAX(cpu)+1 FROM sched) * {end-start})) as load FROM sched WHERE ts BETWEEN {start} AND {end}").as_pandas_dataframe()
-            load = int(c_res['load'].iloc[0]) if not c_res.empty else 0
-            
-            return s_map, l_str, load
-
-        # 각각 데이터 확보
-        n_s, n_l, n_c = fetch_data(self.tp_normal, utid_n, ts_n[0], ts_n[1])
-        s_s, s_l, s_c = fetch_data(self.tp_slow, utid_s, ts_s[0], ts_s[1])
-
-        # AI 주입용 대조 포맷 (N=Normal, S=Slow)
-        # R: Running, Rn: Runnable
-        return (f"[CONTRAST]\n"
-                f"NORMAL: R{n_s.get('R',0)},Rn{n_s.get('R+',0)},S{n_s.get('S',0)} | L:{n_l} | C:Load{n_c}%\n"
-                f"SLOW  : R{s_s.get('R',0)},Rn{s_s.get('R+',0)},S{s_s.get('S',0)} | L:{s_l} | C:Load{s_c}%")
-
-    def profile_thread_functions(self, thread_name="auto"):
+    def profile_thread_functions(self, thread_name="auto", out_limit=3):
         # 1. 대상 스레드 확정 (Registry 활용)
         target = thread_name if thread_name != "auto" else "auto"
         print(f"🔬 스레드 정밀 분석 시작: {target}")
@@ -143,8 +117,8 @@ class CommonAPI:
         md += "| Rank | Function Name | Delta | Ratio | Status |\n"
         md += "| :--- | :--- | :--- | :--- | :--- |\n"
 
-        top_10 = func_deltas[:10]
-        for i, d in enumerate(top_10, 1):
+        top_list = func_deltas[:out_limit]
+        for i, d in enumerate(top_list, 1):
             ratio = (
                 (d["delta"] / denominator * 100)
                 if denominator > 0 and d["delta"] > 0
@@ -160,7 +134,7 @@ class CommonAPI:
 
             md += f"| {i} | {d['name']} | {d['delta']:+.2f}ms | {ratio:.1f}% | {status} |\n"
 
-        if others := func_deltas[10:]:
+        if others := func_deltas[out_limit:]:
             others_delta = sum(d["delta"] for d in others)
             others_pos_delta = sum(d["delta"] for d in others if d["delta"] > 0)
             others_ratio = (
@@ -169,7 +143,7 @@ class CommonAPI:
             md += f"| **Others** | **Sum of remaining {len(others)} functions** | **{others_delta:+.2f}ms** | {others_ratio:.1f}% | - |\n"
         return md
 
-    def check_thread_scheduling(self, thread_name="auto"):
+    def check_thread_scheduling(self, thread_name="auto", out_limit=3):
         # 1. 수사 대상 스레드 확정 (Tool 1에서 찾은 범인 혹은 수동 지정)
         target = thread_name if thread_name != "auto" else "auto"
         print(f"⏳ 스케줄링 최종 수사: {target} 상태 분석")
@@ -242,7 +216,7 @@ class CommonAPI:
             "R+": "Runnable (Preempted)",
         }
 
-        for i, d in enumerate(state_deltas[:10], 1):
+        for i, d in enumerate(state_deltas[:out_limit], 1):
             ratio = (d["delta"] / denominator * 100) if d["delta"] > 0 else 0
             status = (
                 "🔴 INC"

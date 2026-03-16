@@ -1,5 +1,4 @@
 import re
-
 from src.prompt_values import PromptValues
 from ollama_manager import OllamaManager
 
@@ -12,69 +11,94 @@ class FusionAIDelegate:
         self.chunk_count = [0]
 
     def _extract_load_type(self, cfs_data):
-        if "C:Load" in cfs_data:
-            return "Load"
-        elif "C:ProcLoad" in cfs_data:
-            return "ProcLoad"
-        else:
+        if not cfs_data or not isinstance(cfs_data, str):
             return "Unknown"
-
-    def request_final_report(self, sched_md, profile_md, raw_ai_verdict):
-        design_prompt = "앞서 수립된 디자인 원칙에 따라 아래 데이터를 전문가용 리포트로 재구성해줘."
-        report_context = [
-            {"role": "system", "content": PromptValues.getReportDesignerPrompt()},
-            {"role": "user", "content": f"""
-                {design_prompt}
-                
-                [DATA - Scheduling]
-                {sched_md}
-                
-                [DATA - Profiling]
-                {profile_md}
-                
-                [RAW VERDICT]
-                {raw_ai_verdict}
-            """}
-        ]
-        pretty_report = self.ollama_manager.request(report_context)
-        result = pretty_report["message"]["content"] if isinstance(pretty_report, dict) and "message" in pretty_report else str(pretty_report)
-        return result
+        if "C:Load" in cfs_data: return "Load"
+        if "C:ProcLoad" in cfs_data: return "ProcLoad"
+        return "Unknown"
 
     def request_analysis(self, current_round, cfs_block):
+        # Round 1: 시스템 프롬프트 및 초기 지침 주입
         if current_round == 1:
-            user_content = (f"Analyze the following FUSION data block according to SOP. "
-                f"Provide a CRP verdict or request a TARGET_SLICE.\n\n"
-                f"Round 1 Data: {cfs_block}")
             load_type = self._extract_load_type(cfs_block)
-            # 첫 라운드: 시스템 지침 + 첫 데이터로 히스토리 초기화
+            system_instruction = PromptValues.getFusionCoreSystemPrompt(load_type)
+            user_content = (f"Analyze the following FUSION data block according to SOP. "
+                            f"Focus on Delta (Slow-Normal). Round 1 Data:\n{cfs_block}")
             self.history = [
-                {"role": "system", "content": PromptValues.getFusionCoreSystemPrompt(load_type)},
+                {"role": "system", "content": system_instruction},
                 {"role": "user", "content": user_content}
             ]
         else:
-            # 이후 라운드: 이전 기록 뒤에 새로운 데이터만 추가
-            self.history.append({"role": "user", "content": f"Round {current_round} Data: {cfs_block}"})
+            # 후속 라운드: 데이터 추가 및 다음 타겟 요청
+            self.history.append({
+                "role": "user", 
+                "content": f"Round {current_round} Data: {cfs_block}\nIdentify the next suspect or execute 'Backtrack'."
+            })
 
-        # 누적된 히스토리 전체를 전달 (메모리 유지)
+        # Ollama 요청 실행
         response = self.ollama_manager.request(
-            self.history, chunk_callback=self._chunk_callback
+            self.history, 
+            chunk_callback=self._chunk_callback
         )
+
+        # 토큰 사용량 체크 (Ollama 기준)
+        total_used_token = response.get("prompt_eval_count", 0) + response.get(
+            "eval_count", 0
+        )
+        self.output_callback("\\token " + str(total_used_token))
         
-        # AI의 답변도 히스토리에 저장 (이래야 다음 라운드에서 자기 말을 기억함)
-        result = response["message"]["content"] if isinstance(response, dict) and "message" in response else str(response)
+        # 응답 처리
+        raw_result = response["message"]["content"] if isinstance(response, dict) and "message" in response else str(response)
+        result = raw_result.strip()
+        
+        # 히스토리 누적
         self.history.append({"role": "assistant", "content": result})
-        
         return result
 
     def parse_slice_request(self, ai_text):
-        # AI가 "TARGET_SLICE: [이름]" 형식을 쓰도록 유도하거나 정규식으로 추출
-        match = re.search(r"TARGET_SLICE:\s*\[?(\w+)\]?", ai_text)
-        return match.group(1) if match else None
+        if not ai_text: return None
+
+        # 1. 태그 패턴 최적화: [NEXT_TARGET], [NEXT], TARGET_SLICE 모두 대응
+        # 핵심은 'NEXT_TARGET'을 가장 먼저 체크하는 것입니다.
+        pattern = r"(?:\[NEXT_TARGET\]|\[NEXT\]|TARGET_SLICE):?\s*\[?([\w\.\$<> /:#-]+)\]?"
+        match = re.search(pattern, ai_text, re.IGNORECASE)
+        
+        if match:
+            target = match.group(1).strip()
+            
+            # 2. 마침표나 사족 제거 (AI가 가끔 'Choreographer.' 처럼 마침표를 찍음)
+            target = target.rstrip('.')
+            
+            # 3. 엔진 예약 키워드 동기화
+            u_target = target.upper()
+            
+            # "Case Closed" 판정 (DONE, FINISHED 등 유연하게 대응)
+            if any(kw in u_target for kw in ["CASE CLOSED", "DONE", "FINISHED", "CONCLUDED"]):
+                return "Backtrack" if "BACKTRACK" in u_target else "Case Closed"
+            
+            if "BACKTRACK" in u_target: 
+                return "Backtrack"
+                
+            if u_target in ['NONE', 'N/A', 'UNKNOWN']: 
+                return None
+                
+            return target
+            
+        return None
+
+    def trim_last_cfs_data(self):
+        """
+        [Rule G] 백트랙 시 마지막 실패 경로의 거대 데이터를 히스토리에서 제거 (토큰 확보)
+        """
+        if len(self.history) >= 2:
+            # 마지막 Assistant 응답(실패한 추론)과 User 요청(CFS 데이터) 제거
+            self.history.pop() 
+            self.history.pop()
+            if self.output_callback:
+                self.output_callback("🛡️ [Token Guard] History trimmed to prevent context overflow.")
 
     def _chunk_callback(self, chunk):
         spinner_msg = f"\r💬 추론 중... {self.spinner[self.chunk_count[0] % len(self.spinner)]}"
         if self.output_callback:
             self.output_callback(spinner_msg, False)
-        else:
-            print(spinner_msg, end="", flush=True)
         self.chunk_count[0] += 1

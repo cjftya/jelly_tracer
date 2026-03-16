@@ -1,146 +1,128 @@
 ﻿```text
-  _______                         _____                _   _             
- |__   __|                       |  __ \              | | (_)            
-    | |_ __ __ _  ___ ___        | |  | | ___  ___ ___| |_ ___   _____ 
-    | | '__/ _` |/ __/ _ \       | |  | |/ _ \/ __/ _ \ __| \ \ / / _ \
-    | | | | (_| | (_|  __/       | |__| |  __/ (_|  __/ |_| |\ V /  __/
-    |_|_|  \__,_|\___\___|       |_____/ \___|\___\___|\__|_| \_/ \___|
-                / \   _ __   __| |_ __ ___ (_) __| |                   
-               / _ \ | '_ \ / _` | '__/ _ \| |/ _` |                   
-              / ___ \| | | | (_| | | | (_) | | (_| |                   
-             /_/   \_\_| |_|\__,_|_|  \___/|_|\__,_|
+   ____      _                         ____                      ____   ___  
+  / __/_  __(_)___  ____              / ___|___  _ __ ___       |___ \ / _ \ 
+ | |_ | | | | / __|/ __ \   _____    | |   / _ \| '__/ _ \        __) | | | |
+ |  _|| |_| | \__ \ (_) /  |_____|   | |__| (_) | | |  __/       / __/| |_| |
+ |_|   \__,_|_|___/\___/              \____\___/|_|  \___|      |_____|\___/ 
+                                                                             
+  🕵️‍♂️ [ SYSTEM ]: ANALYZING TARGET THREAD...                        [ 🟢 ACTIVE ]
+  🔍 [ TRACE  ]: FUSION-DATA-DELEGATE SYNCED...                    [ ⚡ FAST ]
+  🧠 [ CORE   ]: AI-INFERENCE ENGINE READY...                      [ 💎 2.0 ]
+ -----------------------------------------------------------------------------
 
 ```
 
-# 🕵️‍♂️ TraceDetectiveAndroid v1.32 (Titanium Edition)
-"From Intuition to Mathematical Validation"
-TraceDetectiveAndroid는 성능 저하(Regression)의 원인을 직관이 아닌 수치로 증명하기 위해 설계된 자동화 분석 에이전트입니다.
+# 🕵️‍♂️ Fusion-Core 2.0: High-Precision Android Forensic Engine
+
+## 📋 Overview
+**Fusion-Core 2.0**은 안드로이드 시스템의 복잡한 지연(Jank)과 성능 병목 현상을 해결하기 위한 **차세대 지능형 포렌식 분석 엔진**입니다. 📱 수만 개의 원시 이벤트가 기록된 Perfetto 트레이스에서 핵심 지표를 추출하고, 이를 8단계의 다차원 추론 루프와 결합하여 시스템 레이어부터 앱 비즈니스 로직까지 관통하는 **'Causal-Chain(인과 관계)'**을 자동 도출합니다. 🔍
 
 ---
 
-## 📌 Project Concept
-성능 분석은 방대한 데이터 속에서 유의미한 원인을 찾아내는 고도의 집중력이 필요한 작업입니다. TraceDetectiveAndroid는 서로 다른 두 시점의 시스템 트레이스(Normal vs Slow)를 대조 분석하여 성능 회귀의 지배적인 원인을 자율적으로 탐색합니다. 단순한 데이터 시각화를 넘어, 유의미한 지연 시간의 변화량($\Delta$)을 계산하고 전체 지연에 대한 기여도를 산출하는 **Decision-making Framework**를 제공합니다.
+## 💡 Project Concept: "The Delta Decoder"
+엔진의 핵심은 **[Normal vs. Slow]** 트레이스의 상대적 차이를 분석하는 **'Delta-based Inference'** 메커니즘입니다. 🔄
+* **📏 State Synchronization:** 두 트레이스 간의 시간축과 스레드 상태를 물리적으로 동기화하여 분석 오차를 최소화합니다.
+* **🧪 Logic Contrasting:** 정상 케이스를 베이스라인으로 삼아, 지연 케이스에서 발생하는 예외적 스케줄링 및 함수 점유를 추적합니다.
+* **↩️ Autonomous Pivot:** 추론 과정에서 가설이 기각될 경우, 스스로 이전 분기점으로 회귀(Backtrack)하여 새로운 수사 경로를 탐색합니다.
 
 ---
 
-## 🌟 Key Value Propositions
+## 💎 Key Value Propositions
 
-### 1. Zero-Noise Differential Analysis
-기존 프로파일링 방식은 '절대적인 실행 시간'에 매몰되기 쉽습니다. TraceDetectiveAndroid는 **Differential(차분) 분석**을 기본 원칙으로 삼아, 시스템 백그라운드 노이즈를 제거하고 오직 이번 회귀(Regression)를 유발한 순수 변동량만을 추적합니다.
+### 🎨 [SSR Architecture] 
+> AI 출력 형식을 데이터 태그로 규격화하여 **토큰 소모량 90% 절감** 및 구조적 할루시네이션을 원천 차단합니다.
 
-### 2. Evidence-Based Decision Making
-"느려진 것 같다"는 추측성 보고를 지양합니다. 모든 분석 단계에서 **Latency Coverage** 지표를 산출하여, 식별된 원인이 전체 문제의 몇 퍼센트를 설명하는지 수학적으로 제시합니다. 이는 분석 결과의 객관성을 확보하고 후속 최적화 작업의 우선순위를 결정하는 기준이 됩니다.
+### ♻️ [Pivot & Purge] 
+> 백트랙 시 무효화된 컨텍스트를 즉각 퍼지(Purge)하여 **24k 컨텍스트 내 가용 지능 밀도**를 극대화합니다.
 
-### 3. Engineering Resource Optimization
-엔지니어가 수천 개의 트레이스 슬라이스를 일일이 대조하는 반복적이고 소모적인 작업을 AI 에이전트가 대신 수행합니다. SOP가 코드화되어 있어, 주니어부터 시니어까지 일관되고 높은 수준의 분석 품질을 유지할 수 있습니다.
+### 🌐 [Dual-Language Protocol] 
+> 논리 추론은 밀도 높은 **English**, 액션 아이템은 직관적인 **Korean**으로 제공하여 분석 밀도를 높입니다.
 
-### 4. Self-Correcting Analytical Logic
-분석 과정에서 가설이 데이터와 일치하지 않거나 진척도가 정체될 경우, 시스템이 이를 스스로 감지하고 분석 경로를 변경(Pivot)합니다. 이러한 **자가 교정 루프**는 분석의 막다른 길(Dead-end)에서 낭비되는 시간을 최소화합니다.
+### 🎯 [Targeted Strike Logic] 
+> 수만 개의 슬라이스 중 지연 기여도가 가장 높은 **핵심 슬라이스(Critical Path)**를 정밀 타격하여 분석합니다.
 
 ---
 
-## 🏗️ Core Architecture Components
+## 🏛️ Core Architecture Components
 
-* **Differential Analysis API**: SQL 기반의 정밀 데이터 추출 및 계층 구조 중복 합산 방지 로직 탑재.
-* **Autonomous Reasoning Executor**: 분석 진척도 기반의 실시간 경로 제어 및 피드백 루프 관리.
-* **Metric-Driven SOP**: 안드로이드 스레드 상태 모델에 최적화된 표준 분석 절차 자동화.
+### 📂 Data Pipeline Layer (The Eyes)
+* **🛠️ SQL Abstraction Delegate:** Perfetto Trace Processor를 기반으로 저수준 쿼리를 실행하여 스레드 상태 및 함수 프로파일링 데이터를 정제합니다.
+* **⏱️ Sync-Engine:** 상이한 타임스탬프를 가진 두 트레이스 데이터를 논리적 실행 시점에 맞춰 정렬합니다.
+
+### 🧠 Inference Orchestrator (The Brain)
+* **🎮 Round-based Controller:** 최대 8라운드의 수사 과정을 관리하며, 각 단계의 단서를 기반으로 다음 분석 대상을 결정합니다.
+* **🛡️ Token Guard:** 컨텍스트 사용량을 실시간 모니터링하고, 백트랙 카운터를 제어하여 자원 낭비를 방지합니다.
+
+### 📄 Report Builder (The Output)
+* **🏗️ Server-Side Renderer:** AI가 송출한 태그 데이터를 물리적 프로파일링 지표와 결합하여 고해상도 마크다운 리포트를 조립합니다.
+
+---
+
+## 🔄 Investigation Workflow (8-Round SOP)
+1. **📍 R1: Target Lock-on:** 지연이 발생한 주범 스레드 식별 및 베이스라인 설정.
+2. **🔬 R2-R4: Deep Profiling:** 함수 호출 스택 및 스케줄링 간섭 현상 분석.
+3. **⚖️ R5-R6: Hypothesis Testing:** 도출된 원인에 대한 교차 검증 및 백트랙 판단.
+4. **🔗 R7: Root Cause Alignment:** 시스템/앱 레이어별 책임 소재(Responsibility) 확정.
+5. **🎁 R8: Data Synthesis:** 리포트 렌더링을 위한 최종 데이터 팩 생성.
 
 ---
 
 ## 📊 Key Evaluation Metrics
-* **Local Δ**: 특정 컴포넌트나 함수 구간에서 발생한 순수 지연 시간의 변화량입니다.
-* **Latency Coverage**: 식별된 원인이 전체 Regression에서 차지하는 지분율입니다. (증명된 지연 시간 / 전체 지연 시간)
-* **Insight Status**: `⚪ STABLE`, `🔴 INC`, `🟢 DEC` 지표를 통해 분석 대상의 상태를 즉각적으로 판별합니다.
-
----
-
-## 📑 Analytical Report Output
-분석 프로세스가 종료되면 **Forensic Analysis Report**를 자동 생성합니다. 이 보고서는 단계별 분석 데이터와 LaTeX 수식을 활용한 수학적 증명 과정을 포함하여, 엔지니어가 즉시 Action-item을 도출할 수 있는 전문적인 인사이트를 제공합니다.
+* **🧠 Reasoning Density:** 라운드당 투입되는 정보량 대비 도출되는 기술적 단서의 비중.
+* **🚑 Backtrack Recovery Rate:** 잘못된 수사 경로 진입 시 정해진 리미트(2회) 내에 정답 경로로 복귀하는 능력.
+* **✅ Report Fidelity:** 수동 분석 결과와 자동화 리포트 간의 인과관계 일치도.
 
 ---
 
 ## 📜 Forensic Report Sample
 
 ```text
-╔══════════════════════════════════════════════════════════════════════════════╗
-║                   PERFORMANCE FORENSIC INVESTIGATION REPORT                  ║
-╚══════════════════════════════════════════════════════════════════════════════╝
-  [ CASE ID ]  TD-CASE-2603130352         [ TIMESTAMP ]  2026-03-13 03:52:10
-════════════════════════════════════════════════════════════════════════════════
- 📝 [ EXECUTIVE SUMMARY ]
-    "reportFullyDrawn 지점이 Baseline 대비 14.7s 지연됨. 기기 환경은 동일하며, 
-     특정 스레드의 CPU 점유율이 80% 이상을 차지하는 비정상 패턴 탐지."
+# 🕵️‍♂️ FUSION-CORE FORENSIC REPORT
+**ID:** FC-0317-1420 | **Thread:** RenderThread | **Status:** 🔴 Critical
+============================================================
+### 🚨 EXECUTIVE SUMMARY
+> **ANALYSIS:** onDraw 내부에서 매 프레임마다 대형 Bitmap 객체를 생성(createBitmap)함에 따라 가비지 컬렉션(GC) 부하가 급증하였으며, 이로 인해 RenderThread가 VSYNC 신호를 놓치게 되어 32ms 이상의 심각한 프레임 드롭(Jank)이 발생하고 있습니다.
 
- 🚩 ✅ [ ANALYSIS CERTIFIED ]
-    ▶ Data Accounting : 🟢 VERIFIED (수학적 증명 완료)
-    ▶ Latency Coverage    : 94.2% (High Confidence)
+**Responsibility Allocation:**
+- 📱 **Application:** 95%
+- ⚙️ **System/Kernel:** 5%
 
- 🎯 [ ROOT CAUSE IDENTIFIED ]
-    ▶ [MainThread] 내 중복된 XML 뷰 인플레이션 및 복잡한 레이아웃 중첩 발생
+------------------------------------------------------------
+### 📊 PHYSICAL EVIDENCE (PHYS)
+#### ⏳ Thread Scheduling Logic
+| State | Duration (ms) | Ratio | Insight |
+| :--- | :--- | :--- | :--- |
+| **Running** | **+45.2ms** | **85%** | High CPU contention in App layer |
+| Runnable | 2.1ms | 4% | Minimal preemption detected |
+| Sleeping | 5.8ms | 11% | Waiting for GC/Heap allocation |
 
- 📱 [ DEVICE ENVIRONMENT CONTEXT ]
-    | Metric     | Normal (Baseline)    | Slow (Target)        | Status    |
-    |------------|----------------------|----------------------|-----------|
-    | Avg CPU    | 1475 MHz             | 1475 MHz             | ✅ Stable |
-    | Load       | 99.6%                | 99.6%                | 🔥 Heavy  |
-    | Core       | Big                  | Big                  | ✅ Same   |
+#### 🔬 Function Execution Profile
+| Function Name | Self (ms) | Total (ms) | Source |
+| :--- | :--- | :--- | :--- |
+| **android.graphics.Bitmap.createBitmap** | **28.4** | 35.2 | Framework |
+| android.view.View.draw | 5.2 | 42.1 | View System |
+| com.example.app.CustomView.onDraw | 4.1 | 48.5 | App Logic |
 
-    [ 용어 해설 ]
-    • Avg CPU: 평균 동작 속도 (단위: MHz) - 낮을수록 기기 발열로 인한 성능 제한 상태
-    • Load: 시스템 과부하 (단위: %) - 높을수록 다른 앱의 간섭으로 인해 실행이 지연됨
-    • Core: 핵심 코어 배정 (Big/Little) - 고성능(Big) 혹은 저전력(Little) 코어 사용 여부
+------------------------------------------------------------
+### 🛠️ STRATEGIC ACTION ITEMS
+- 1. onDraw 내부의 모든 객체 생성(Allocation) 로직을 멤버 변수화 또는 초기화 시점으로 이동.
+- 2. Bitmap Pool을 도입하여 비트맵 재사용을 최적화하고 GC 트리거 횟수를 절감할 것.
+- 3. 대형 이미지의 경우 하드웨어 비트맵(Hardware Bitmap) 사용을 검토하여 메모리 복사 비용 최소화.
 
- 🛠️ [ INVESTIGATION PATH ]
-    • Tools Used    : Milestone Scan, CPU Delta Tracer, Device Context API
-    • Key Evidence  : MainThread CPU 사용 지분 84.6% 탐지
-──────────────────────────────────────────────────────────────────────────────
- 📊 [ FORENSIC ANALYSIS DETAIL ]
-
-    ● Milestone Delta
-      - bindApplication: +12.40ms | ✅ OK
-      - activityStart: +45.20ms | 🚨 REGRESSION
-      - reportFullyDrawn: +14723.18ms | 🚨 REGRESSION
-
-    ● Thread CPU Delta (Total Δ: +14710.45ms)
-      📌 Latency Coverage: 94.2%
-      - (MainThread): +12450.20ms | 84.6% | 🔴 INC
-      - (RenderThread): +1240.15ms | 8.4% | 🔴 INC
-
-──────────────────────────────────────────────────────────────────────────────
- ✅ [ RECOMMENDATIONS ]
-    ☞ 메인 스레드에서 수행 중인 뷰 생성 로직을 Background Thread로 분산
-    ☞ 레이아웃 계층을 단순화하여 렌더링 시 발생하는 중복 연산 제거
-
-════════════════════════════════════════════════════════════════════════════════
-                END OF INVESTIGATION - TRACEDETECTIVE v1.32                
-════════════════════════════════════════════════════════════════════════════════
+---
+*Generated by Fusion-Core Engine v2.0 (Integrated SSR Mode)*
 
 ```
 
 ---
 
-## 📅 Roadmap
-
-### 🛠 Local Optimization
-- [ ] **Quantization Tuning**: GGUF/AWQ 등 로컬 환경에 최적화된 양자화 모델 지원 (Llama-3-8B-q4_K_M 등).
-- [ ] **Context Window Management**: 저사양 환경을 위한 Sliding Window 및 Evidence Summarization 로직 도입.
-- [ ] **Cross-Platform**: Windows 및 Linux 환경 완전 호환 지원.
-
-### 📈 Performance & Utility
-- [ ] **Lazy Loading System**: 대용량 트레이스 로드 시 필요한 슬라이스만 메모리에 올리는 최적화.
-- [ ] **Local Metadata DB**: 분석 결과 및 성능 이력을 외부 서버 없이 로컬 SQLite에 누적 관리.
-- [ ] **Pre-defined SQL Library**: 안드로이드 고유 지연 패턴(Binder, Lock, Scheduler)에 최적화된 로컬 전용 쿼리셋 확장.
-
-### 🤖 Accessibility
-- [ ] **Hardware-Adaptive Presets**: PC 사양에 따른 분석 모드(Deep vs Lite) 자동 전환 기능.
-- [ ] **Local Web UI (Optional)**: 터미널 외에 로컬 브라우저에서 분석 과정을 모니터링할 수 있는 가벼운 대시보드.
+## 🚀 Roadmap
+* **🚩 Milestone 1 (Stable):** SSR 기반 리포팅 체계 및 백트랙 최적화 완료.
+* **🛰️ Milestone 2 (Advanced):** Binder 트랜잭션 추적을 통한 IPC(Inter-Process Communication) 병목 분석 기능 추가.
+* **🌌 Milestone 3 (Vision):** 커널 스케줄러(CFS) 지표 심층 연동 및 하드웨어 스로틀링(DVFS) 감지 알고리즘 통합.
 
 ---
 
 ## 👥 Contributors
 
 - **cjftya**: AI-Driven Performance Forensic Expert & Lead Architect
-
----
-
-*Documentation generated by TraceDetectiveAndroid v1.32*
