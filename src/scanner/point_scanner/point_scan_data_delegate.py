@@ -2,17 +2,15 @@ import pandas as pd
 import numpy as np
 from common_api import CommonAPI
 
-class FusionDataDelegate:
+class PointScanDataDelegate:
     def __init__(self, output_callback):
         self._common_api = None
         self.utid_n = None
         self.utid_s = None
-        self.target_package = None
         self.output_callback = output_callback
         self.num_cpus = 8  # 기본값, init에서 동적 업데이트
 
     def init(self, trace_normal, trace_slow, target_package):
-        self.target_package = target_package
         self._common_api = CommonAPI(trace_normal, trace_slow, target_package)
         
         # 시스템 코어 수 미리 파악 (CPU Load 계산 오버헤드 방지)

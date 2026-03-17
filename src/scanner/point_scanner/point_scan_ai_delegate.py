@@ -2,7 +2,7 @@ import re
 from prompt_values import PromptValues
 from ollama_manager import OllamaManager
 
-class FusionAIDelegate:
+class PointScanAIDelegate:
     def __init__(self, ollama_manager: OllamaManager, output_callback):
         self.output_callback = output_callback
         self.ollama_manager = ollama_manager
@@ -21,7 +21,7 @@ class FusionAIDelegate:
         # Round 1: 시스템 프롬프트 및 초기 지침 주입
         if current_round == 1:
             load_type = self._extract_load_type(cfs_block)
-            system_instruction = PromptValues.getFusionCoreSystemPrompt(load_type)
+            system_instruction = PromptValues.getPointScanSystemPrompt(load_type)
             user_content = (f"Analyze the following FUSION data block according to SOP. "
                             f"Focus on Delta (Slow-Normal). Round 1 Data:\n{cfs_block}")
             self.history = [

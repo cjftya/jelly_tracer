@@ -38,6 +38,7 @@ class ExecutorThread(threading.Thread):
         progress_callback=None,
         token_callback=None,
         finished_callback=None,
+        analysis_data_path: str = None,
     ):
         super().__init__(daemon=True)
         self.normal_path = normal_path
@@ -48,6 +49,7 @@ class ExecutorThread(threading.Thread):
         self.progress_callback = progress_callback
         self.token_callback = token_callback
         self.finished_callback = finished_callback
+        self.analysis_data_path = analysis_data_path
         self.results: list[str] = []
         atexit.register(self.stop)
         self._stop_event = threading.Event()
@@ -79,6 +81,7 @@ class ExecutorThread(threading.Thread):
                 self.slow_path,
                 self.target_package,
                 model_name=self.model_name,
+                analysis_data_path=self.analysis_data_path,
             )
         finally:
             pass
@@ -106,7 +109,7 @@ class TraceGui(ctk.CTk):
         ctk.set_default_color_theme("blue")
 
         self.thread: ExecutorThread | None = None
-        self.engine = Engine()
+        self.engine = Engine(gui=self)
         self.console_font_size = 10
 
         # Configure Grid
@@ -141,11 +144,13 @@ class TraceGui(ctk.CTk):
 
     def _build_ui(self):
         # --- Sidebar ---
-        self.sidebar_frame = ctk.CTkFrame(
-            self, width=280, corner_radius=0, fg_color="#1A1A1A"
+        self.sidebar_frame = ctk.CTkScrollableFrame(
+            self, width=280, corner_radius=0, fg_color="#1A1A1A",
+            scrollbar_button_color="#333333",
+            scrollbar_button_hover_color="#444444"
         )
         self.sidebar_frame.grid(row=0, column=0, sticky="nsew")
-        self.sidebar_frame.grid_rowconfigure(10, weight=1)
+        self.sidebar_frame.grid_columnconfigure(0, weight=1)
 
         # Trace Settings Group
         self.settings_label = ctk.CTkLabel(
@@ -155,7 +160,7 @@ class TraceGui(ctk.CTk):
             text_color="#888888",
             anchor="w",
         )
-        self.settings_label.grid(row=0, column=0, padx=25, pady=(40, 10), sticky="w")
+        self.settings_label.grid(row=0, column=0, padx=25, pady=(40, 10), sticky="ew")
 
         self.package_edit = ctk.CTkEntry(
             self.sidebar_frame,
@@ -174,7 +179,7 @@ class TraceGui(ctk.CTk):
             text_color="#555555",
             anchor="w",
         )
-        self.model_label.grid(row=2, column=0, padx=25, pady=(5, 0), sticky="w")
+        self.model_label.grid(row=2, column=0, padx=25, pady=(5, 0), sticky="ew")
 
         self.model_combo = ctk.CTkOptionMenu(
             self.sidebar_frame,
@@ -187,6 +192,79 @@ class TraceGui(ctk.CTk):
         self.model_combo.set("model")
         self.model_combo.grid(row=3, column=0, padx=25, pady=(0, 10), sticky="ew")
 
+        # Analysis Data
+        self.analysis_label = ctk.CTkLabel(
+            self.sidebar_frame,
+            text="Analysis Data",
+            font=ctk.CTkFont(size=10, weight="bold"),
+            text_color="#555555",
+            anchor="w",
+        )
+        self.analysis_label.grid(row=4, column=0, padx=25, pady=(5, 0), sticky="ew")
+
+        self.analysis_frame = ctk.CTkFrame(self.sidebar_frame, fg_color="transparent")
+        self.analysis_frame.grid(row=5, column=0, padx=25, pady=(0, 10), sticky="ew")
+        self.analysis_frame.grid_columnconfigure(0, weight=1)
+
+        self.analysis_edit = ctk.CTkEntry(
+            self.analysis_frame,
+            placeholder_text="Select JSON analysis data",
+            height=35,
+            fg_color="#242424",
+        )
+        self.analysis_edit.grid(row=0, column=0, sticky="ew", pady=(0, 5))
+
+        self.btn_analysis = ctk.CTkButton(
+            self.analysis_frame,
+            text="Browse JSON",
+            command=self._choose_json_data,
+            height=32,
+            fg_color="#333333",
+            hover_color="#444444",
+            text_color="#AAAAAA",
+        )
+        self.btn_analysis.grid(row=1, column=0, sticky="ew")
+
+        # Scan Operations checkboxes
+        self.scan_opts_label = ctk.CTkLabel(
+            self.sidebar_frame,
+            text="SCAN OPS",
+            font=ctk.CTkFont(size=10, weight="bold"),
+            text_color="#555555",
+            anchor="w",
+        )
+        self.scan_opts_label.grid(row=6, column=0, padx=25, pady=(15, 0), sticky="ew")
+
+        self.scan_opts_frame = ctk.CTkFrame(self.sidebar_frame, fg_color="transparent")
+        self.scan_opts_frame.grid(row=7, column=0, padx=25, pady=(5, 10), sticky="ew")
+
+        self.point_scan_var = tk.BooleanVar(value=True)
+        self.point_scan_cb = ctk.CTkCheckBox(
+            self.scan_opts_frame, text="point scan", variable=self.point_scan_var,
+            font=ctk.CTkFont(size=12), border_width=2,
+            command=lambda: self._on_scan_mode_select("point"),
+            state="disabled"
+        )
+        self.point_scan_cb.pack(anchor="w", pady=2)
+
+        self.insight_scan_var = tk.BooleanVar(value=False)
+        self.insight_scan_cb = ctk.CTkCheckBox(
+            self.scan_opts_frame, text="insight scan", variable=self.insight_scan_var,
+            font=ctk.CTkFont(size=12), border_width=2,
+            command=lambda: self._on_scan_mode_select("insight"),
+            state="disabled"
+        )
+        self.insight_scan_cb.pack(anchor="w", pady=2)
+
+        self.genesis_scan_var = tk.BooleanVar(value=False)
+        self.genesis_scan_cb = ctk.CTkCheckBox(
+            self.scan_opts_frame, text="genesis scan", variable=self.genesis_scan_var,
+            font=ctk.CTkFont(size=12), border_width=2,
+            command=lambda: self._on_scan_mode_select("genesis"),
+            state="disabled"
+        )
+        self.genesis_scan_cb.pack(anchor="w", pady=2)
+
         # Separator-like padding
         self.path_label = ctk.CTkLabel(
             self.sidebar_frame,
@@ -195,11 +273,11 @@ class TraceGui(ctk.CTk):
             text_color="#888888",
             anchor="w",
         )
-        self.path_label.grid(row=4, column=0, padx=25, pady=(20, 10), sticky="w")
+        self.path_label.grid(row=8, column=0, padx=25, pady=(20, 10), sticky="ew")
 
         # Path Selection
         self.path_frame = ctk.CTkFrame(self.sidebar_frame, fg_color="transparent")
-        self.path_frame.grid(row=5, column=0, padx=25, pady=10, sticky="ew")
+        self.path_frame.grid(row=9, column=0, padx=25, pady=10, sticky="ew")
         self.path_frame.grid_columnconfigure(0, weight=1)
 
         self.normal_edit = ctk.CTkEntry(
@@ -434,11 +512,60 @@ class TraceGui(ctk.CTk):
             entry_widget.delete(0, "end")
             entry_widget.insert(0, path)
 
+    def _choose_json_data(self):
+        path = filedialog.askopenfilename(
+            title="Select Analysis Data (JSON)",
+            filetypes=[("JSON files", "*.json")]
+        )
+        if path:
+            self.analysis_edit.delete(0, "end")
+            self.analysis_edit.insert(0, path)
+
+    def set_scan_checkbox_state(self, scan_type, checked=None, enabled=None):
+        """
+        scan_type: 'point', 'insight', 'genesis'
+        """
+        mapping = {
+            'point': (self.point_scan_cb, self.point_scan_var),
+            'insight': (self.insight_scan_cb, self.insight_scan_var),
+            'genesis': (self.genesis_scan_cb, self.genesis_scan_var)
+        }
+        if scan_type in mapping:
+            cb, var = mapping[scan_type]
+            if checked is not None:
+                var.set(checked)
+                if checked: # If we're checking one externally, uncheck others
+                    self._on_scan_mode_select(scan_type)
+            if enabled is not None:
+                cb.configure(state="normal" if enabled else "disabled")
+
+    def _on_scan_mode_select(self, active_mode):
+        """Implement radio-button like behavior for scan checkboxes."""
+        if active_mode == "point":
+            if self.point_scan_var.get():
+                self.insight_scan_var.set(False)
+                self.genesis_scan_var.set(False)
+            else:
+                self.point_scan_var.set(True) # Keep at least one checked
+        elif active_mode == "insight":
+            if self.insight_scan_var.get():
+                self.point_scan_var.set(False)
+                self.genesis_scan_var.set(False)
+            else:
+                self.insight_scan_var.set(True)
+        elif active_mode == "genesis":
+            if self.genesis_scan_var.get():
+                self.point_scan_var.set(False)
+                self.insight_scan_var.set(False)
+            else:
+                self.genesis_scan_var.set(True)
+
     def _on_run(self):
         normal = self.normal_edit.get().strip()
         slow = self.slow_edit.get().strip()
         target_pkg = self.package_edit.get().strip()
         model = self.model_combo.get().strip()
+        analysis_data = self.analysis_edit.get().strip()
 
         if not normal or not slow:
             messagebox.showwarning("Missing paths", "Both trace paths must be set.")
@@ -469,6 +596,7 @@ class TraceGui(ctk.CTk):
             progress_callback=self._append_line,
             token_callback=self._update_token_usage,
             finished_callback=self._on_finished,
+            analysis_data_path=analysis_data,
         )
         self.thread.start()
 

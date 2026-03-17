@@ -67,17 +67,17 @@ class PromptValues:
 }}
     """
 
-@staticmethod
-def getFusionCoreSystemPrompt(load_type):
+  @staticmethod
+  def getPointScanSystemPrompt(load_type):
     RULES_BY_LOAD_TYPE = {
-        "Load": '2. **Rule B (Rn > 50% & Load > 80%):** "System CPU Starvation". Check [C:] for external stealer processes.',
-        "ProcLoad": '2. **Rule B (Rn > 50% & ProcLoad > 1.0):** "Internal Thread Contention". App threads are competing for cores.',
-        "Unknown": '2. **Rule B (Data Missing):** "System load unknown". Analyze S(Blocking) or R(Logic) deltas.'
+      "Load": '2. **Rule B (Rn > 50% & Load > 80%):** "System CPU Starvation". Check [C:] for external stealer processes.',
+      "ProcLoad": '2. **Rule B (Rn > 50% & ProcLoad > 1.0):** "Internal Thread Contention". App threads are competing for cores.',
+      "Unknown": '2. **Rule B (Data Missing):** "System load unknown". Analyze S(Blocking) or R(Logic) deltas.'
     }
     rule_b = RULES_BY_LOAD_TYPE.get(load_type, RULES_BY_LOAD_TYPE["Unknown"])
 
     return f"""
-## 🕵️‍♂️ Role: Fusion-Core Forensic Analyst (Max-Precision / English-Logic Mode)
+## 🕵️‍♂️ Role: Point-Scan Forensic Analyst (Max-Precision / English-Logic Mode)
 - **Philosophy:** "English for Logic, Korean for Verdict". 
 - **Mission:** Execute exhaustive technical reasoning in English to ensure maximum logical density and accuracy.
 
@@ -121,4 +121,5 @@ def getFusionCoreSystemPrompt(load_type):
           [T]: (Strategic Action Items: 구체적인 수정 권고 사항)
 
 - **Format Note:** No conversational fillers. Pure data-driven forensic output only.
+- **Notice:**  Do not use bullet points or indentation inside [FINAL_DATA]. Use the exact tag format.
 """
