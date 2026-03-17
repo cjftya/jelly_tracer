@@ -77,7 +77,6 @@ class OllamaManager:
         forensic_env["OLLAMA_FLASH_ATTENTION"] = "1"
         forensic_env["OLLAMA_KV_CACHE_TYPE"] = "q4_0"
         forensic_env["OLLAMA_NUM_PARALLEL"] = "1"
-        forensic_env["OLLAMA_MAX_LOADED_MODELS"] = "1"
 
         self.__process = subprocess.Popen(
             ["ollama", "serve"],

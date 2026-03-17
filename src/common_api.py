@@ -8,8 +8,8 @@ class CommonAPI:
         self.tp_n = TraceProcessor(file_path=normal_trace_path)
         self.tp_s = TraceProcessor(file_path=slow_trace_path)
         self.package = package_name
-        self.upid_n = self.get_upid(self.tp_n)
-        self.upid_s = self.get_upid(self.tp_s)
+        self.upid_n = self._get_upid(self.tp_n)
+        self.upid_s = self._get_upid(self.tp_s)
 
     def _get_upid(self, tp):
         # 1단계: [신규] 패키지 리스트 지도로 UID부터 확보 (가장 정확)

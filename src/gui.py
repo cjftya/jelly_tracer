@@ -56,7 +56,7 @@ class ExecutorThread(threading.Thread):
         self.token_used = 0
         self.token_total = 0
 
-        def cb(msg: str, system: bool):
+        def cb(msg: str, system: bool=False):
             if msg.startswith("\\token"):
                 self.token_used += int(msg.replace("\\token", "").strip())
                 if self.token_callback:

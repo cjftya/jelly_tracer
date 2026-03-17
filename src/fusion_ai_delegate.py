@@ -87,15 +87,12 @@ class FusionAIDelegate:
         return None
 
     def trim_last_cfs_data(self):
-        """
-        [Rule G] 백트랙 시 마지막 실패 경로의 거대 데이터를 히스토리에서 제거 (토큰 확보)
-        """
         if len(self.history) >= 2:
             # 마지막 Assistant 응답(실패한 추론)과 User 요청(CFS 데이터) 제거
             self.history.pop() 
             self.history.pop()
             if self.output_callback:
-                self.output_callback("🛡️ [Token Guard] History trimmed to prevent context overflow.")
+                self.output_callback("🛡️ [Token Guard] History trimmed to prevent context overflow.", True)
 
     def _chunk_callback(self, chunk):
         spinner_msg = f"\r💬 추론 중... {self.spinner[self.chunk_count[0] % len(self.spinner)]}"
