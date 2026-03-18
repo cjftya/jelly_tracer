@@ -10,6 +10,7 @@ class PointScanner(BaseScanner):
         self.max_round = 8
         self.backtrack_limit = 2  # 💡 백트랙 최대 허용 횟수
         self.backtrack_count = 0  # 💡 현재 백트랙 누적 횟수
+        self.target_package = None
         
         # Delegates
         self.data_provider = None
@@ -29,6 +30,7 @@ class PointScanner(BaseScanner):
 
     def run(self, trace_normal, trace_slow, target_package, analysis_data=None):
         super().run(trace_normal, trace_slow, target_package, analysis_data)
+        self.target_package = target_package
         self.data_provider.init(trace_normal, trace_slow, target_package)
         self.output_callback(f"🚀 [Point-Scan] Investigation Started: {target_package}")
         
@@ -67,14 +69,31 @@ class PointScanner(BaseScanner):
         while current_round <= self.max_round:
             is_final_round = (current_round == self.max_round)
             self.output_callback(f"\n📡 [Round {current_round}/{self.max_round}] Analyzing...")
+
+            current_cfs = cfs_block
+            if is_final_round:
+                # 8라운드일 때 AI에게 보내는 메시지에 '마지막 경고'를 섞음
+                current_cfs += (
+                    "\n\n🚨 [SYSTEM MANDATE: FINAL ROUND] 🚨\n"
+                    "This is the 8th and FINAL round. You CANNOT request [NEXT_TARGET] anymore.\n"
+                    "You MUST conclude the investigation NOW and output [FINAL_DATA] (V, O, C, A, S, T) based on collected evidence."
+                )
             
-            # AI 분석 요청
-            ai_response = self.ai_analyst.request_analysis(current_round, cfs_block)
-            
-            # 라운드 모니터링: [REASONING] 출력
-            reasoning = re.search(r"\[REASONING\]:(.*?)(?=\[|$)", ai_response, re.S)
-            self.output_callback(f"🤖 [Thinking] {reasoning.group(1).strip() if reasoning else 'Analyzing...'}")
-            
+            ai_response = self.ai_analyst.request_analysis(current_round, current_cfs)
+
+            # 생각 모드(<think>)와 일반 모드([REASONING])를 모두 지원하는 멀티 파싱
+            thought_process = "Analyzing..."
+            think_match = re.search(r"<think>(.*?)</think>", ai_response, re.S)
+            reasoning_match = re.search(r"\[REASONING\]:(.*?)(?=\[|$)", ai_response, re.S)
+
+            if think_match:
+                thought_process = think_match.group(1).strip()
+            elif reasoning_match:
+                thought_process = reasoning_match.group(1).strip()
+
+            # UI 출력: 너무 길면 앞부분만 살짝 보여주거나, 스트리밍이므로 그대로 출력
+            self.output_callback(f"🤖 [Thinking] {thought_process}")
+
             # 다음 수사 타겟 추출
             target_slice = self.ai_analyst.parse_slice_request(ai_response)
             
@@ -129,7 +148,10 @@ class PointScanner(BaseScanner):
             # 3. 새로운 타겟 슬라이스 탐색 (Targeted Strike)
             new_ts_n = self.data_provider.get_slice_bounds("normal", self.utid_n, target_slice)
             new_ts_s = self.data_provider.get_slice_bounds("slow", self.utid_s, target_slice)
-            self.output_callback(f"🎯 [Targeted Strike] Searching: {target_slice}, {new_ts_n}, {new_ts_s}", True)
+
+            n_str = f"{new_ts_n[0]}-{new_ts_n[1]}" if new_ts_n else "None"
+            s_str = f"{new_ts_s[0]}-{new_ts_s[1]}" if new_ts_s else "None"
+            self.output_callback(f"🎯 [Targeted Strike] {target_slice} | N:{n_str} | S:{s_str}", True)
 
             if new_ts_s:
                 scope_key = (tuple(new_ts_n or []), tuple(new_ts_s))
@@ -149,49 +171,63 @@ class PointScanner(BaseScanner):
 
     def build_final_report(self, ai_response, sched_md, profile_md, investigation_id, thread_name):
         def extract(tag):
-            # [O] 태그 추가 및 다양한 마크다운 스타일(Bold, Brackets 등) 대응 패턴
-            # 뒤에 오는 태그를 미리 보고 멈추는 Lookahead 패턴 강화
-            pattern = rf"(?:\*\*?|\[?)\s*{tag}\s*(?:\]?|\*\*?)\s*[:：]\s*(.*?)(?=\n\s*\[|\n\s*\*\*\[|\n\s*[A-Z]\[|#|$)"
+            # 1. 태그 추출 정규식: [TAG], **TAG**, TAG: 등 다양한 변종 대응
+            # 다음 태그가 나오거나 줄바꿈+태그가 나오기 전까지의 모든 내용을 긁어옵니다.
+            pattern = rf"(?:\[{tag}\]|\*\*{tag}\*\*|{tag})\s*[:：]?\s*(.*?)(?=\n\s*\[|\n\s*\*\*|\n\s*[A-Z][:：]|$)"
             match = re.search(pattern, ai_response, re.DOTALL | re.IGNORECASE)
+            
             if match:
+                # 마크다운 잔여물 및 불필요한 공백 제거
                 content = match.group(1).strip()
-                # 불필요한 마크다운 기호 및 잔여 대괄호 제거
                 return content.replace("**", "").replace("[", "").replace("]", "").strip()
+            
+            # 2. [REASONING] 태그 부재 시 <think> 태그에서 요약본 추출 (Fallback)
+            if tag in ["REASONING", "C"]:
+                think_match = re.search(r"<think>(.*?)</think>", ai_response, re.S)
+                if think_match and tag == "REASONING":
+                    text = think_match.group(1).strip()
+                    return (text[:300] + "...") if len(text) > 300 else text
+                    
             return "N/A"
 
-        # 신규 태그 [O]를 포함한 데이터 추출
-        data = {
-            "V": extract("V"),  # Verdict
-            "O": extract("O"),  # Responsible Owner (추가)
-            "C": extract("C"),  # Cause (Korean)
-            "A": extract("A"),  # App %
-            "S": extract("S"),  # System %
-            "T": extract("T")   # Task/Action
-        }
+        # 데이터 추출 (L1 전용 태그 맵핑)
+        verdict = extract("V")  # 판결 (🔴, ⚠️, ✅)
+        owner = extract("O")    # 책임 소재 (📱 App, 🏛️ Framework 등)
+        cause = extract("C")    # 원인 분석 (한글)
+        app_pct = extract("A")  # 앱 비중
+        sys_pct = extract("S")  # 시스템 비중
+        actions = extract("T")  # 권고 조치
 
-        # 리포트 생성 (가독성 및 포렌식 스타일 강화)
+        # 3. 리포트 마크다운 구조화 (가독성 중심)
         report = (
-            f"\n# 🕵️‍♂️ POINT-SCAN FORENSIC REPORT (v2.0)\n"
-            f"**ID:** `{investigation_id}` | **Thread:** `{thread_name}`\n"
-            f"**Status:** {data['V']} | **Responsible:** {data['O']}\n"
-            f"{'='*65}\n"
-            f"### 🚨 EXECUTIVE SUMMARY\n"
-            f"> **CAUSE:** {data['C']}\n\n"
-            f"**Responsibility Allocation:**\n"
-            f"- 📱 **Application:** `{data['A']}%` | ⚙️ **System/Kernel:** `{data['S']}%` \n"
-            f"- **Primary Owner:** {data['O']}\n\n"
-            f"{'-'*65}\n"
-            f"### 📊 PHYSICAL EVIDENCE (PHYS)\n"
-            f"#### ⏳ Thread Scheduling Logic (Delta Analysis)\n"
+            f"# 🕵️‍♂️ FUSION-CORE FORENSIC REPORT (L1-Point)\n"
+            f"**Invest-ID:** `{investigation_id}` | **Target:** `{thread_name}`\n"
+            f"**Verdict:** {verdict} | **Responsible:** {owner}\n"
+            f"{'='*70}\n\n"
+            
+            f"### 🚨 핵심 부검 결론 (Verdict Summary)\n"
+            f"> **{cause}**\n\n"
+            
+            f"#### 📊 지연 책임 배분 (Responsibility)\n"
+            f"| 구분 | 비중 (%) | 책임 주체 |\n"
+            f"| :--- | :--- | :--- |\n"
+            f"| **📱 Application** | `{app_pct}%` | {owner if 'App' in owner else '-'} |\n"
+            f"| **⚙️ System/Kernel** | `{sys_pct}%` | {owner if 'App' not in owner else '-'} |\n\n"
+            
+            f"{'-'*70}\n"
+            f"### 🔬 물리적 증거 분석 (Physical Evidence)\n"
+            f"#### ⏳ 스케줄링 델타 (Scheduling Delta)\n"
             f"{sched_md}\n\n"
-            f"#### 🔬 Function Execution Profile (Top Slices)\n"
+            
+            f"#### 📈 함수 실행 프로파일 (Function Profile)\n"
             f"{profile_md}\n\n"
-            f"{'-'*65}\n"
-            f"### 🛠️ STRATEGIC ACTION ITEMS\n"
-            f"**Recommended Fixes:**\n"
-            f"{data['T']}\n\n"
+            
+            f"{'-'*70}\n"
+            f"### 🛠️ 전략적 대응 방안 (Action Items)\n"
+            f"**수사관 권고 사항:**\n"
+            f"{actions}\n\n"
+            
             f"---\n"
-            f"*Generated by Point-Scan Engine v2.0 (Integrated SSR Mode)*\n"
-            f"*Scan Protocol: L1 Point Scan Completed*"
+            f"*Reported by FusionCore 3.0 Sniper Engine (Qwen3-8B)*\n"
         )
         return report

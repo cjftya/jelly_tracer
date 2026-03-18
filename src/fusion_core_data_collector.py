@@ -8,45 +8,34 @@ class FusionCoreDataCollector:
         pass
 
     def collect_point_scan_data(self, scanner, ai_history, final_report_md):
+        # 1. 마지막 응답 확보 (태그 추출용)
+        # ai_history는 <think>가 제거된 정제된 기록입니다.
         final_ai_msg = ai_history[-1]["content"] if ai_history else ""
 
         def extract_tag(tag):
-            # 태그 정밀 도려내기 (마크다운 및 대괄호 대응)
+            # 대괄호([])나 마크다운(**)이 섞인 태그를 정밀하게 추출
             pattern = rf"(?:\*\*?|\[?)\s*{tag}\s*(?:\]?|\*\*?)\s*[:：]\s*(.*?)(?=\n\s*\[|\n\s*\*\*\[|\n\s*[A-Z]\[|$)"
             match = re.search(pattern, final_ai_msg, re.DOTALL | re.IGNORECASE)
             return match.group(1).strip() if match else "N/A"
 
-        # 1. 시공간 좌표 확정
-        final_scope_n, final_scope_s = scanner.scope_stack[-1] if scanner.scope_stack else (None, None)
-
-        # 2. 물적 증거 식별자 추출 (8라운드 전체 전수 조사)
-        all_conv_text = " ".join([m["content"] for m in ai_history])
-        correlation_ids = list(set(re.findall(r"(0x[0-9a-fA-F]+|Binder:\d+|TID:\d+)", all_conv_text)))
-
-        # 3. 오답 노트 (최근 3개 스코프)
-        ignore_history = [str(scope) for scope in scanner.investigated_scopes[-3:]]
-
-        # 🧠 [지능형 브리핑 생성] REASONING 섹션 추출 및 최적화
-        reasoning_full = extract_tag("REASONING")
-        if reasoning_full == "N/A":
-            reasoning_full = final_ai_msg
+        # 2. 지능형 브리핑 생성 (생각 아카이브 활용)
+        reasoning_full = "N/A"
+        if hasattr(scanner.ai_analyst, 'thought_archive') and scanner.ai_analyst.thought_archive:
+            last_thought_raw = scanner.ai_analyst.thought_archive[-1]["full_content"]
+            thought_match = re.search(r'<think>(.*?)</think>', last_thought_raw, re.DOTALL)
+            reasoning_full = thought_match.group(1).strip() if thought_match else last_thought_raw
 
         cleaned_reasoning = re.sub(r'\s+', ' ', reasoning_full)
         brief_limit = 600 
+        final_brief = (cleaned_reasoning[:brief_limit] + "...") if len(cleaned_reasoning) > brief_limit else cleaned_reasoning
 
-        if len(cleaned_reasoning) > brief_limit:
-            # 문장 단위로 끊어주는 지능형 절삭
-            last_period = cleaned_reasoning.rfind('.', 0, brief_limit)
-            if last_period > brief_limit * 0.7:
-                final_brief = cleaned_reasoning[:last_period + 1]
-            else:
-                final_brief = cleaned_reasoning[:brief_limit] + "..."
-        else:
-            final_brief = cleaned_reasoning
-
-        # 4. 마스터 JSON 조립
+        # 3. 마스터 JSON 조립 (누락 데이터 전면 보강)
         timestamp = datetime.now().strftime("%Y-%m-%d-%H-%M")
         file_name = f"point_scan_({scanner.target_package})_({timestamp})"
+        
+        # 조사된 스코프들을 문자열 리스트로 변환 (insight 중복 분석 방지용)
+        ignore_history = [f"N:{s[0]}, S:{s[1]}" for s in scanner.investigated_scopes]
+
         master_data = {
             "scan_type": "point",
             "metadata": {
@@ -57,38 +46,39 @@ class FusionCoreDataCollector:
                 "num_cpus": getattr(scanner.data_provider, 'num_cpus', 8)
             },
             "target_window": {
-                "start_ms": final_scope_s[0] if final_scope_s else 0,
-                "end_ms": final_scope_s[1] if final_scope_s else 0,
+                "start_ns": scanner.scope_stack[-1][1][0] if scanner.scope_stack else 0,
+                "end_ns": scanner.scope_stack[-1][1][1] if scanner.scope_stack else 0,
                 "margin_ms": 50.0
             },
             "targeting": {
-                "correlation_ids": correlation_ids[:10],
-                "backtrack_count": scanner.backtrack_count,
-                "confidence_score": 0.95 if "🔴" in extract_tag("V") else 0.75
+                "backtrack_count": getattr(scanner, 'backtrack_count', 0),
+                "confidence_score": 0.95 if "🔴" in extract_tag("V") else 0.75,
+                "pivot_candidates": getattr(scanner.data_provider, 'pivot_candidates', [])
             },
             "compression_guide": {
                 "investigated_depth": len(scanner.scope_stack),
                 "ignore_history": ignore_history,
                 "reference_delta": {
-                    "app_pct": extract_tag("A"),
-                    "sys_pct": extract_tag("S")
+                    "app_pct": extract_tag("A"), # 📱 누락 데이터 추가
+                    "sys_pct": extract_tag("S")  # ⚙️ 누락 데이터 추가
                 }
             },
             "forensic_intel": {
                 "verdict": extract_tag("V"),
                 "owner": extract_tag("O"),
                 "cause_korean": extract_tag("C"),
+                "action_items": extract_tag("T"), # 🛠️ 누락 데이터 추가
                 "reasoning_brief": final_brief 
             },
             "raw_archives": {
-                "full_ai_history": ai_history,
+                "clean_ai_history": ai_history,
+                "thought_archive": getattr(scanner.ai_analyst, 'thought_archive', []),
                 "final_report_md": final_report_md
             }
         }
 
-        # 5. 파일 시스템에 영구 박제
-        dir_name = f"point_scan_({scanner.target_package})"
-        save_dir = f"./investigations/{dir_name}/"
+        # 4. 저장 로직
+        save_dir = f"./investigations/point_scan_({scanner.target_package})/"
         os.makedirs(save_dir, exist_ok=True)
         
         json_file = os.path.join(save_dir, f"{file_name}.json")

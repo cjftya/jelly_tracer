@@ -1,7 +1,6 @@
 from scanner.base_scanner import BaseScanner
 from scanner.point_scanner.point_scanner import PointScanner
 from scanner.insight_scanner.insight_scanner import InsightScanner
-from scanner.genesis_scanner.genesis_scanner import GenesisScanner
 from fusion_core_data_parser import FusionCoreDataParser
 
 class FusionCoreEngine:
@@ -43,14 +42,10 @@ class FusionCoreEngine:
     def _create_scanner(self, scan_type):
         if scan_type == "point":
             return InsightScanner()
-        elif scan_type == "insight":
-            return GenesisScanner()
         return PointScanner()
 
     def _update_scan_status(self, scan_type):
         if scan_type == "point":
             self.update_scan_status("insight", checked=True)
-        elif scan_type == "insight":
-            self.update_scan_status("genesis", checked=True)
         else:
             self.update_scan_status("point", checked=True)

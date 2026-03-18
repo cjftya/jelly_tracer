@@ -12,7 +12,7 @@ class OllamaManager:
         self.__process = None 
         self.os_type = platform.system()
         
-        self.__options = {
+        self.__default_options = {
             "num_ctx": 24576,
             "temperature": 0,
             "top_p": 0.9,
@@ -31,17 +31,21 @@ class OllamaManager:
         self.__model_name = model_name
 
     def get_context_size(self):
-        return self.__options.get("num_ctx", 0)
+        return self.__default_options.get("num_ctx", 0)
 
-    def request(self, context, format=None, chunk_callback=None):
+    def request(self, context, think_mode=False, num_predict=2048, format=None, chunk_callback=None):
         client = Client(host="http://127.0.0.1:11434")
+        op = self.__default_options.copy()
+        op["num_predict"] = num_predict
+
         response_stream = client.chat(
             model=self.__model_name,
             messages=context,
             format=format,
-            options=self.__options,
+            options=op,
             stream=True,
             keep_alive=0,
+            think=think_mode
         )
 
         full_response = {"message": {"content": ""}}
@@ -58,16 +62,6 @@ class OllamaManager:
                 full_response["eval_count"] = chunk["eval_count"]
 
         return full_response
-
-    def request_text(self, prompt: str):
-        client = Client(host="http://127.0.0.1:11434")
-        response = client.generate(
-            model=self.__model_name,
-            prompt=prompt,
-            options=self.__options,
-            keep_alive=0,
-        )
-        return response.get("response", "")
 
     def start_engine(self):
         self.stop_engine() 
