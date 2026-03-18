@@ -1,125 +1,76 @@
 ﻿```text
-   ____      _                         ____                      ____   ___  
-  / __/_  __(_)___  ____              / ___|___  _ __ ___       |___ \ / _ \ 
- | |_ | | | | / __|/ __ \   _____    | |   / _ \| '__/ _ \        __) | | | |
- |  _|| |_| | \__ \ (_) /  |_____|   | |__| (_) | | |  __/       / __/| |_| |
- |_|   \__,_|_|___/\___/              \____\___/|_|  \___|      |_____|\___/ 
-                                                                             
-  🕵️‍♂️ [ SYSTEM ]: ANALYZING TARGET THREAD...                        [ 🟢 ACTIVE ]
-  🔍 [ TRACE  ]: FUSION-DATA-DELEGATE SYNCED...                    [ ⚡ FAST ]
-  🧠 [ CORE   ]: AI-INFERENCE ENGINE READY...                      [ 💎 2.0 ]
- -----------------------------------------------------------------------------
+  ╭━━━╮╭╮  ╭╮╭━━━╮╭━━╮╭━━━╮╭━╮  ╭╮     ╭━━━╮╭━━━╮╭━━━╮╭━━━╮
+  ┃╭━━╯┃┃  ┃┃┃╭━╮┃╰┫┣╯┃╭━╮┃┃┃╰╮ ┃┃     ┃╭━╮┃┃╭━╮┃┃╭━╮┃┃╭━━╯
+  ┃╰━━╮┃┃  ┃┃╰━╮┃┃ ┃┃ ┃┃ ┃┃┃╭╮╰╮┃┃     ┃┃ ╰╯┃┃ ┃┃┃╰━╯┃┃╰━━╮
+  ┃╭━━╯┃┃  ┃┃┃╰━╯┃ ┃┃ ┃┃ ┃┃┃┃╰╮╰╯┃     ┃┃ ╭╮┃┃ ┃┃┃╭╮╭╯┃╭━━╯
+  ┃┃   ┃╰━━╯┃╰━━━╯╭┫┣╮┃╰━╯┃┃┃ ╰╮ ┃     ┃╰━╯┃┃╰━╯┃┃┃┃╰╮┃╰━━╮
+  ╰╯   ╰━━━━╯     ╰━━╯╰━━━╯╰╯  ╰━╯     ╰━━━╯╰━━━╯╰╯╰━╯╰━━━╯
+                                       ───────────────
+      ╭━━━╮   ╭╮  ╭━━━╮                🔎 POINT-SCAN (L1)
+      ╰━━╮┃  ╭╯╰╮ ┃╭━╮┃                🔬 INSIGHT-SCAN (L2)
+       ╭━━╯┃ ╰╮╭╯ ┃┃ ┃┃                ⚖️ FINAL VERDICT
+       ╰━━╮┃  ╰╯  ┃┃ ┃┃                ───────────────
+      ╭━━━╯┃      ┃╰━╯┃       "Smooth Intelligence, Sharp Results."
+      ╰━━━━╯      ╰━━━╯
 
 ```
 
-# 🕵️‍♂️ Fusion-Core 2.0: High-Precision Android Forensic Engine
+# 🕵️‍♂️ Fusion-Core 3.0: Android Performance Forensic Engine ⚡
 
-## 📋 Overview
-**Fusion-Core 2.0**은 안드로이드 시스템의 복잡한 지연(Jank)과 성능 병목 현상을 해결하기 위한 **차세대 지능형 포렌식 분석 엔진**입니다. 📱 수만 개의 원시 이벤트가 기록된 Perfetto 트레이스에서 핵심 지표를 추출하고, 이를 8단계의 다차원 추론 루프와 결합하여 시스템 레이어부터 앱 비즈니스 로직까지 관통하는 **'Causal-Chain(인과 관계)'**을 자동 도출합니다. 🔍
-
----
-
-## 💡 Project Concept: "The Delta Decoder"
-엔진의 핵심은 **[Normal vs. Slow]** 트레이스의 상대적 차이를 분석하는 **'Delta-based Inference'** 메커니즘입니다. 🔄
-* **📏 State Synchronization:** 두 트레이스 간의 시간축과 스레드 상태를 물리적으로 동기화하여 분석 오차를 최소화합니다.
-* **🧪 Logic Contrasting:** 정상 케이스를 베이스라인으로 삼아, 지연 케이스에서 발생하는 예외적 스케줄링 및 함수 점유를 추적합니다.
-* **↩️ Autonomous Pivot:** 추론 과정에서 가설이 기각될 경우, 스스로 이전 분기점으로 회귀(Backtrack)하여 새로운 수사 경로를 탐색합니다.
+> **"Every lag leaves a trace. We find the smoking gun."** > 안드로이드 시스템의 심연(Deep-Dive)을 파헤쳐 지연의 근본 원인을 확정하는 AI 기반 디지털 포렌식 엔진입니다.
 
 ---
 
-## 💎 Key Value Propositions
-
-### 🎨 [SSR Architecture] 
-> AI 출력 형식을 데이터 태그로 규격화하여 **토큰 소모량 90% 절감** 및 구조적 할루시네이션을 원천 차단합니다.
-
-### ♻️ [Pivot & Purge] 
-> 백트랙 시 무효화된 컨텍스트를 즉각 퍼지(Purge)하여 **24k 컨텍스트 내 가용 지능 밀도**를 극대화합니다.
-
-### 🌐 [Dual-Language Protocol] 
-> 논리 추론은 밀도 높은 **English**, 액션 아이템은 직관적인 **Korean**으로 제공하여 분석 밀도를 높입니다.
-
-### 🎯 [Targeted Strike Logic] 
-> 수만 개의 슬라이스 중 지연 기여도가 가장 높은 **핵심 슬라이스(Critical Path)**를 정밀 타격하여 분석합니다.
+## 🌟 Overview: The New Standard of Profiling
+**Fusion-Core 3.0**은 기존의 단순한 트레이스 뷰어를 넘어, 자율적으로 병목을 추적하고 판결을 내리는 **지능형 수사 파이프라인**입니다. Qwen 3 Flash의 기민한 정찰력과 DeepSeek-R1의 냉철한 분석력을 결합하여, 수천만 개의 이벤트 속에서 단 10k 토큰 내외의 핵심 증거만으로 진실을 인양합니다.
 
 ---
 
-## 🏛️ Core Architecture Components
-
-### 📂 Data Pipeline Layer (The Eyes)
-* **🛠️ SQL Abstraction Delegate:** Perfetto Trace Processor를 기반으로 저수준 쿼리를 실행하여 스레드 상태 및 함수 프로파일링 데이터를 정제합니다.
-* **⏱️ Sync-Engine:** 상이한 타임스탬프를 가진 두 트레이스 데이터를 논리적 실행 시점에 맞춰 정렬합니다.
-
-### 🧠 Inference Orchestrator (The Brain)
-* **🎮 Round-based Controller:** 최대 8라운드의 수사 과정을 관리하며, 각 단계의 단서를 기반으로 다음 분석 대상을 결정합니다.
-* **🛡️ Token Guard:** 컨텍스트 사용량을 실시간 모니터링하고, 백트랙 카운터를 제어하여 자원 낭비를 방지합니다.
-
-### 📄 Report Builder (The Output)
-* **🏗️ Server-Side Renderer:** AI가 송출한 태그 데이터를 물리적 프로파일링 지표와 결합하여 고해상도 마크다운 리포트를 조립합니다.
+## 🎯 Project Concept: "Search & Destroy"
+본 프로젝트는 **'반증 불가능한 물리적 증거'**만을 신봉합니다.
+* **Precision Targeting:** L1 정찰을 통해 지연이 발생한 특정 윈도우를 나노초($ns$) 단위로 정밀 타격합니다.
+* **Evidence-First Verdict:** AI의 막연한 추측을 배제하고, SQL 쿼리로 증명된 물리적 수치($ms$)만을 근거로 기소장을 작성합니다.
 
 ---
 
-## 🔄 Investigation Workflow (8-Round SOP)
-1. **📍 R1: Target Lock-on:** 지연이 발생한 주범 스레드 식별 및 베이스라인 설정.
-2. **🔬 R2-R4: Deep Profiling:** 함수 호출 스택 및 스케줄링 간섭 현상 분석.
-3. **⚖️ R5-R6: Hypothesis Testing:** 도출된 원인에 대한 교차 검증 및 백트랙 판단.
-4. **🔗 R7: Root Cause Alignment:** 시스템/앱 레이어별 책임 소재(Responsibility) 확정.
-5. **🎁 R8: Data Synthesis:** 리포트 렌더링을 위한 최종 데이터 팩 생성.
+## 🚀 Key Value Propositions
+* **🎯 8-Round Iterative Targeting (L1):** 8차례의 반복 추론(CoT)을 통해 노이즈를 걷어내고 최적의 수사 범위를 확정합니다.
+* **⚖️ Dual-Phase Evidence Audit (L2):** 탐사와 검증의 2단계를 거쳐, 1단계 가설이 실제 데이터와 일치하는지 '자기 비판적 부검'을 수행합니다.
+* **🔋 Token-Efficient Infrastructure:** 6GB VRAM 환경에서도 안정적인 추론이 가능하도록 '생각 아카이브' 및 '데이터 하드캡' 기술을 적용했습니다.
+* **🧬 Multi-Layer Correlation:** 함수 실행(`v_stack`), 락 경합(`locks`), 시스템 부하(`neighbors`), 스케줄링 상태(`rhythm`)를 입체적으로 연결합니다.
 
 ---
 
-## 📊 Key Evaluation Metrics
-* **🧠 Reasoning Density:** 라운드당 투입되는 정보량 대비 도출되는 기술적 단서의 비중.
-* **🚑 Backtrack Recovery Rate:** 잘못된 수사 경로 진입 시 정해진 리미트(2회) 내에 정답 경로로 복귀하는 능력.
-* **✅ Report Fidelity:** 수동 분석 결과와 자동화 리포트 간의 인과관계 일치도.
+## 🏛️ Core Architecture & Workflow
+
+### 🛰️ Layer 1: The Scout (Point-Scan)
+* **Core Module:** `PointScanner`
+* **Investigation Strategy:** 델타 분석 및 8라운드 반복 포위망(Iterative Funnel) 추론 전략
+* **Deliverables:** 정밀 타겟 윈도우 좌표와 `pivot_candidates`가 포함된 마스터 브리프(Master Brief) 산출
+
+### 🔬 Layer 2: The Pathologist (Insight-Scan)
+* **Core Module:** `InsightScanner`
+* **Investigation Strategy:** 5대 전문 API를 통한 심연 드릴링(Drilling) 및 2단계 최종 판결(Final Verdict)
+* **Forensic Metrics:**
+    1. **Vertical Stacks:** 실행 지연의 약 80%를 설명하는 상위 25개 핵심 함수 추출
+    2. **Lock Contention:** 스레드 중단(Stall)을 유발하는 상위 10개 락(Lock) 경합 식별
+    3. **CPU Neighbors:** 외부 프로세스 간섭으로 인한 CPU 자원 기아(Starvation) 현상 탐지
+    4. **Thread Rhythm:** 스레드의 상태 천이(Running/Runnable/Sleep) 패턴 정밀 분석
+    5. **Binder Payload:** IPC 통신 오버헤드 및 트랜잭션 지연 시간 검증
 
 ---
 
-## 📜 Forensic Report Sample
-
-```text
-# 🕵️‍♂️ FUSION-CORE FORENSIC REPORT
-**ID:** FC-0317-1420 | **Thread:** RenderThread | **Status:** 🔴 Critical
-============================================================
-### 🚨 EXECUTIVE SUMMARY
-> **ANALYSIS:** onDraw 내부에서 매 프레임마다 대형 Bitmap 객체를 생성(createBitmap)함에 따라 가비지 컬렉션(GC) 부하가 급증하였으며, 이로 인해 RenderThread가 VSYNC 신호를 놓치게 되어 32ms 이상의 심각한 프레임 드롭(Jank)이 발생하고 있습니다.
-
-**Responsibility Allocation:**
-- 📱 **Application:** 95%
-- ⚙️ **System/Kernel:** 5%
-
-------------------------------------------------------------
-### 📊 PHYSICAL EVIDENCE (PHYS)
-#### ⏳ Thread Scheduling Logic
-| State | Duration (ms) | Ratio | Insight |
-| :--- | :--- | :--- | :--- |
-| **Running** | **+45.2ms** | **85%** | High CPU contention in App layer |
-| Runnable | 2.1ms | 4% | Minimal preemption detected |
-| Sleeping | 5.8ms | 11% | Waiting for GC/Heap allocation |
-
-#### 🔬 Function Execution Profile
-| Function Name | Self (ms) | Total (ms) | Source |
-| :--- | :--- | :--- | :--- |
-| **android.graphics.Bitmap.createBitmap** | **28.4** | 35.2 | Framework |
-| android.view.View.draw | 5.2 | 42.1 | View System |
-| com.example.app.CustomView.onDraw | 4.1 | 48.5 | App Logic |
-
-------------------------------------------------------------
-### 🛠️ STRATEGIC ACTION ITEMS
-- 1. onDraw 내부의 모든 객체 생성(Allocation) 로직을 멤버 변수화 또는 초기화 시점으로 이동.
-- 2. Bitmap Pool을 도입하여 비트맵 재사용을 최적화하고 GC 트리거 횟수를 절감할 것.
-- 3. 대형 이미지의 경우 하드웨어 비트맵(Hardware Bitmap) 사용을 검토하여 메모리 복사 비용 최소화.
-
----
-*Generated by Fusion-Core Engine v2.0 (Integrated SSR Mode)*
-
-```
+## 🛠️ Forensic Infrastructure
+* **AI Engine:** Ollama (DeepSeek-R1-8B & Qwen3-8B)
+* **Context Guard:** 24,576 Tokens (Smart Trimming 적용)
+* **Data Storage:** 수사 정황 및 AI의 고뇌(Thinking)를 박제하는 `FusionCoreDataCollector`
 
 ---
 
-## 🚀 Roadmap
-* **🚩 Milestone 1 (Stable):** SSR 기반 리포팅 체계 및 백트랙 최적화 완료.
-* **🛰️ Milestone 2 (Advanced):** Binder 트랜잭션 추적을 통한 IPC(Inter-Process Communication) 병목 분석 기능 추가.
-* **🌌 Milestone 3 (Vision):** 커널 스케줄러(CFS) 지표 심층 연동 및 하드웨어 스로틀링(DVFS) 감지 알고리즘 통합.
+## 🏁 Roadmap
+* **✅ Phase 1:** L1/L2 하이브리드 파이프라인 및 5대 심연 API 구축
+* **🔄 Phase 2:** 수사 기록 자동 아카이빙 및 L1-L2 핸드오버 무결성 확보
+* **🚀 Phase 3:** 멀티 트레이스 Diff 분석 및 커널 스케줄러 전문 분석 모듈 확장
 
 ---
 
