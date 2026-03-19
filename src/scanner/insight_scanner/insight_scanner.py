@@ -35,9 +35,9 @@ class InsightScanner(BaseScanner):
                 self.output_callback("⚠️ [Error] Target window is invalid.", True)
                 return
             
-            pivot_candidates = analysis_data.get('intel', {}).get('pivot_candidates', [])
-            if not pivot_candidates:
-                self.output_callback("⚠️ [Error] No pivot candidates found. Cannot proceed with deep dive.", True)
+            top_candidates = analysis_data.get('intel', {}).get('top_candidates', [])
+            if not top_candidates:
+                self.output_callback("⚠️ [Error] No top candidates found. Cannot proceed with deep dive.", True)
                 return
 
             self.output_callback("🔬 Drilling into trace layers (Stacks, Locks, Neighbors, Rhythm, Binder)...")
@@ -55,7 +55,7 @@ class InsightScanner(BaseScanner):
                 "l1_forensic_intel": analysis_data.get('intel', {}),
                 "l1_constraints": analysis_data.get('constraints', {}),
                 "deep_dive_evidence": deep_dive_package, # SQL 결과 (모두 ms 단위)
-                "pivot_candidates": pivot_candidates,
+                "top_candidates": top_candidates,
             }
 
             # 5. 2단계 AI 추론 엔진 가동 (Phase 1: 탐사 -> Phase 2: 검토)

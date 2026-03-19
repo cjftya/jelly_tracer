@@ -22,6 +22,28 @@ class OllamaManager:
             "low_vram": True
         }
 
+    def getL1Option(self):
+        return {
+            "num_ctx": 24576,
+            "temperature": 0.2,
+            "top_p": 0.9,
+            "repeat_penalty": 1.2,
+            "num_predict": 2048,
+            "mirostat": 0,
+            "low_vram": True
+        }
+
+    def getL2Option(self, temperature=0.0):
+        return {
+            "num_ctx": 24576,
+            "temperature": temperature,
+            "top_p": 0.9,
+            "repeat_penalty": 1.2,
+            "num_predict": 2048,
+            "mirostat": 0,
+            "low_vram": True
+        }
+
     def get_installed_models(self):
         client = Client(host="http://127.0.0.1:11434")
         response = client.list()
@@ -33,10 +55,11 @@ class OllamaManager:
     def get_context_size(self):
         return self.__default_options.get("num_ctx", 0)
 
-    def request(self, context, think_mode=False, num_predict=2048, format=None, chunk_callback=None):
+    def request(self, context, options=None, format=None, chunk_callback=None):
         client = Client(host="http://127.0.0.1:11434")
         op = self.__default_options.copy()
-        op["num_predict"] = num_predict
+        if options:
+            op = options
 
         response_stream = client.chat(
             model=self.__model_name,
@@ -44,8 +67,7 @@ class OllamaManager:
             format=format,
             options=op,
             stream=True,
-            keep_alive=0,
-            think=think_mode
+            keep_alive=0
         )
 
         full_response = {"message": {"content": ""}}

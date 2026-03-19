@@ -29,8 +29,7 @@ class FusionCoreEngine:
             analysis_data = self.data_parser.parse(self.analysis_data_path)
             self.output_callback(f"🚀 Loaded analysis data: {self.scan_type}, need to run {self.scanner.__class__.__name__}", True)
         else:
-            self.scan_type = "point"
-            analysis_data = None
+            self.scan_type = None
 
         self._update_scan_status(self.scan_type)
         self.scanner.start(self.ollama_manager, self.output_callback)

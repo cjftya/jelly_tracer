@@ -40,6 +40,7 @@ class FusionCoreDataParser:
         targeting = raw_data.get("targeting", {})
         guide = raw_data.get("compression_guide", {})
         archives = raw_data.get("raw_archives", {})
+        leads = raw_data.get("investigation_leads", {})
 
         return {
             "header": {
@@ -61,7 +62,8 @@ class FusionCoreDataParser:
                 "cause": intel.get("cause_korean", "N/A"),
                 "action_items": intel.get("action_items", "N/A"),
                 "confidence": targeting.get("confidence_score", 0.0),
-                "pivot_candidates": targeting.get("pivot_candidates", [])
+                "top_candidates": leads.get("top_candidates", []),
+                "thought_trail_summary": leads.get("thought_trail_summary", [])
             },
             "constraints": {
                 "ignore_history": guide.get("ignore_history", []),

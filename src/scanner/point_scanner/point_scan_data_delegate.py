@@ -9,7 +9,6 @@ class PointScanDataDelegate:
         self.utid_s = None
         self.output_callback = output_callback
         self.num_cpus = 8  # 기본값, init에서 동적 업데이트
-        self.pivot_candidates = [] # 예비 후보군 저장소
 
     def init(self, trace_normal, trace_slow, target_package):
         self._common_api = CommonAPI(trace_normal, trace_slow, target_package)
@@ -91,7 +90,7 @@ class PointScanDataDelegate:
             """
             try:
                 slice_df = tp.query(query_slice).as_pandas_dataframe()
-                l_str = ", ".join([f"{r['name']}({r['sum_ms']:.1f}ms)" for _, r in slice_df.iterrows()]) if not slice_df.empty else "No_Slices"
+                l_str = ", ".join([f'"{r["name"]}"({r["sum_ms"]:.1f}ms)' for _, r in slice_df.iterrows()]) if not slice_df.empty else "No_Slices"
             except Exception: l_str = "Error"
 
             # 결과 조립: C: 태그 뒤에 load_tag를 붙여 Rule B를 선택하게 함
@@ -139,7 +138,6 @@ class PointScanDataDelegate:
         if df_s.empty: return None
 
         worst_slice, max_impact = None, 0
-        self.pivot_candidates = [] # 초기화
 
         for _, row in df_s.iterrows():
             safe_name = row['name'].replace("'", "''")
@@ -161,20 +159,72 @@ class PointScanDataDelegate:
             delta_ms = slow_ms - n_ms
             impact_score = ratio * delta_ms
 
-            # 후보군 수집 (일정 수준 이상의 임팩트가 있으면 저장)
-            if slow_ms > 5.0 and ratio > 1.2:
-                self.pivot_candidates.append({'name': row['name'], 'impact': impact_score})
-
             if slow_ms > 2.0 and impact_score > max_impact:
                 max_impact = impact_score
                 worst_slice = row['name']
 
-        # 임팩트 순으로 후보군 정렬
-        self.pivot_candidates = sorted(self.pivot_candidates, key=lambda x: x['impact'], reverse=True)
-
         if worst_slice:
             self.output_callback(f"🚩 [Pivot Found] '{worst_slice}' (Impact Score: {max_impact:.1f})", True)
         return worst_slice
+
+    def get_evidential_candidates(self, utid_n, utid_s, limit=3):
+        self.output_callback(f"🛰️ [Multi-Scan] Extracting top {limit} candidate leads...", True)
+
+        dur_n = self.get_total_dur(self._common_api.tp_n)
+        dur_s = self.get_total_dur(self._common_api.tp_s)
+
+        # 1. Slow 트레이스에서 주요 슬라이스 15개 추출
+        query_s = f"""
+            SELECT name, SUM(dur)/1e6 as total_ms 
+            FROM slice 
+            WHERE track_id = (SELECT id FROM thread_track WHERE utid = {utid_s} LIMIT 1)
+            AND dur > 0 GROUP BY 1 ORDER BY 2 DESC LIMIT 15
+        """
+        df_s = self._common_api.tp_s.query(query_s).as_pandas_dataframe()
+        if df_s.empty: return []
+
+        full_candidates = []
+
+        for _, row in df_s.iterrows():
+            name = row['name']
+            safe_name = name.replace("'", "''")
+            slow_ms = row['total_ms']
+            slow_ratio = (slow_ms / dur_s) * 100
+
+            # 2. Normal 트레이스 대조 데이터 확보
+            query_n = f"""
+                SELECT SUM(dur)/1e6 as total_ms FROM slice 
+                WHERE track_id = (SELECT id FROM thread_track WHERE utid = {utid_n} LIMIT 1)
+                AND name = '{safe_name}'
+            """
+            df_n = self._common_api.tp_n.query(query_n).as_pandas_dataframe()
+            n_ms_val = df_n.iloc[0]['total_ms'] if not df_n.empty else 0
+            n_ms = n_ms_val if pd.notna(n_ms_val) and n_ms_val > 0 else 0.01
+            normal_ratio = (n_ms / dur_n) * 100
+
+            # 3. 임팩트 및 델타 계산
+            delta_ms = slow_ms - n_ms
+            ratio_increase = slow_ratio / normal_ratio if normal_ratio > 0 else 100
+            
+            # Evidence 객체 생성
+            if delta_ms > 1.0: # 유의미한 차이가 있는 것만 수집
+                # 🎯 [핵심 수정] None 대신 실제 슬라이스의 좌표를 정밀하게 확보
+                cand_ts_s = self.get_slice_bounds("slow", utid_s, name)
+                cand_ts_n = self.get_sync_bounds("normal", cand_ts_s) if cand_ts_s else None
+
+                full_candidates.append({
+                    "name": name,
+                    "delta_ms": round(delta_ms, 2),
+                    "ratio_inc": round(ratio_increase, 1),
+                    "slow_share": round(slow_ratio, 1),
+                    "parent_context": self._get_parent_slice(utid_s, name), # 👈 부모 슬라이스 정보 추가
+                    "is_binder": self._check_binder_dependency(utid_s, name), # 👈 Binder 대기 여부 추가
+                    "evidence": self.generate_cfs(utid_n, cand_ts_n, utid_s, cand_ts_s)
+                })
+
+        # 4. 임팩트 순 정렬 후 상위 리미트만큼 반환 (경쟁 가능한 후보 집합)
+        full_candidates.sort(key=lambda x: x['delta_ms'], reverse=True)
+        return full_candidates[:limit]
 
     def get_total_dur(self, tp):
         try:
@@ -182,6 +232,48 @@ class PointScanDataDelegate:
             return res.iloc[0, 0] if not res.empty and pd.notna(res.iloc[0, 0]) else 1.0
         except Exception: return 1.0
 
+    def _get_parent_slice(self, utid, name):
+        safe_name = name.replace("'", "''")
+        query = f"""
+            SELECT p.name 
+            FROM slice s
+            JOIN slice p ON s.parent_id = p.id
+            WHERE s.track_id IN (SELECT id FROM thread_track WHERE utid = {utid})
+            AND s.name = '{safe_name}'
+            LIMIT 1
+        """
+        try:
+            res = self._common_api.tp_s.query(query).as_pandas_dataframe()
+            return res.iloc[0]['name'] if not res.empty else "Root/None"
+        except:
+            return "Unknown"
+
+    def _check_binder_dependency(self, utid, name):
+        safe_name = name.replace("'", "''")
+        # 해당 슬라이스의 시간 범위를 먼저 확보
+        query_range = f"""
+            SELECT ts, dur FROM slice 
+            WHERE track_id IN (SELECT id FROM thread_track WHERE utid = {utid})
+            AND name = '{safe_name}' ORDER BY dur DESC LIMIT 1
+        """
+        try:
+            range_res = self._common_api.tp_s.query(query_range).as_pandas_dataframe()
+            if range_res.empty: return False
+            
+            ts, dur = range_res.iloc[0]['ts'], range_res.iloc[0]['dur']
+            
+            # 해당 시간 범위 내에 'binder transaction' 관련 슬라이스가 있는지 확인
+            query_binder = f"""
+                SELECT 1 FROM slice 
+                WHERE track_id IN (SELECT id FROM thread_track WHERE utid = {utid})
+                AND (name LIKE 'binder%' OR name LIKE 'reply %')
+                AND ts >= {ts} AND ts <= {ts + dur}
+                LIMIT 1
+            """
+            binder_res = self._common_api.tp_s.query(query_binder).as_pandas_dataframe()
+            return not binder_res.empty
+        except:
+            return False
 
     def get_global_bounds(self, tp_type="slow"):
         tp = self._common_api.tp_s if tp_type == "slow" else self._common_api.tp_n

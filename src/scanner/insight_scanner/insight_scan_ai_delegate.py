@@ -21,7 +21,11 @@ class InsightScanAIDelegate:
                 {"role": "system", "content": InsightScanPromptValues.getPhase1SystemPrompt()},
                 {"role": "user", "content": f"Analyze this context:\n{brief_json}"}
             ]
-            p1_res = self.ollama_manager.request(p1_context, think_mode=True, num_predict=4096, callback=self._chunk_callback)
+            p1_res = self.ollama_manager.request(
+                p1_context, 
+                options=self.ollama_manager.getL2Option(0.2), 
+                chunk_callback=self._chunk_callback
+            )
 
             p1_thought = self._extract_thought(p1_res)
             if p1_thought:
@@ -36,7 +40,11 @@ class InsightScanAIDelegate:
                 {"role": "system", "content": InsightScanPromptValues.getPhase2SystemPrompt()},
                 {"role": "user", "content": f"Audit this reasoning against the ORIGINAL DATA.\n\n[Original Data]\n{brief_json}\n\n[P1 Reasoning]\n{p1_res}"}
             ]
-            p2_res = self.ollama_manager.request(p2_context, think_mode=True, num_predict=4096, callback=self._chunk_callback)
+            p2_res = self.ollama_manager.request(
+                p2_context, 
+                options=self.ollama_manager.getL2Option(0.1), 
+                callback=self._chunk_callback
+            )
 
             p2_thought = self._extract_thought(p2_res)
             if p2_thought:

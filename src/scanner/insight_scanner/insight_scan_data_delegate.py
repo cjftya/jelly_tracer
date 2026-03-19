@@ -52,9 +52,15 @@ class InsightScanDataDelegate:
 
     def _get_lock_contention(self, start_ns, end_ns, context_start_ns):
         query = f"""
-            SELECT s.name as lock_name, t.name as thread_name,
-                   SUM(MIN(s.ts + s.dur, {end_ns}) - MAX(s.ts, {start_ns})) / 1e6 as wait_ms
-            FROM slice s JOIN thread_track tt ON s.track_id = tt.id JOIN thread t USING (utid)
+            SELECT 
+                s.name as lock_name, 
+                t.name as thread_name,
+                t.tid as tid,
+                SUM(MIN(s.ts + s.dur, {end_ns}) - MAX(s.ts, {start_ns})) / 1e6 as wait_ms,
+                SUBSTR(s.name, INSTR(s.name, 'object ') + 7) as lock_id
+            FROM slice s 
+            JOIN thread_track tt ON s.track_id = tt.id 
+            JOIN thread t USING (utid)
             WHERE (s.name LIKE 'monitor contention%' OR s.name LIKE 'waiting on%')
             AND s.ts < {end_ns} AND (s.ts + s.dur) > {context_start_ns}
             GROUP BY 1, 2 ORDER BY wait_ms DESC
@@ -82,15 +88,24 @@ class InsightScanDataDelegate:
         """
         return self._common_api.tp_s.query(query).as_pandas_dataframe().to_dict(orient='records')
 
-    def _get_binder_payload(self, upid, start_ns, end_ns, context_start_ns):
+    def _get_binder_detailed_info(self, upid, start_ns, end_ns, context_start_ns):
         query = f"""
-            SELECT CASE WHEN name LIKE '%reply%' THEN 'Reply' ELSE 'Call' END as type,
-                   COUNT(*) as count, 
-                   SUM(MIN(ts + dur, {end_ns}) - MAX(ts, {start_ns})) / 1e6 as total_ms
-            FROM slice JOIN thread_track ON slice.track_id = thread_track.id
-            JOIN thread USING (utid)
-            WHERE upid = {upid} AND name LIKE 'binder%'
-            AND ts < {end_ns} AND (ts + dur) > {context_start_ns}
-            GROUP BY 1
+            SELECT 
+                CASE 
+                    WHEN s.name LIKE '%reply%' THEN 'Reply_Wait' 
+                    WHEN s.name LIKE '%async%' THEN 'Async_Call'
+                    ELSE 'Sync_Call' 
+                END as binder_type,
+                t.name as src_thread,
+                COUNT(*) as count, 
+                SUM(MIN(s.ts + s.dur, {end_ns}) - MAX(s.ts, {start_ns})) / 1e6 as total_ms
+            FROM slice s
+            JOIN thread_track tt ON s.track_id = tt.id
+            JOIN thread t USING (utid)
+            WHERE t.upid = {upid} 
+            AND s.name LIKE 'binder%'
+            AND s.ts < {end_ns} AND (s.ts + s.dur) > {context_start_ns}
+            GROUP BY 1, 2
+            ORDER BY total_ms DESC
         """
         return self._common_api.tp_s.query(query).as_pandas_dataframe().to_dict(orient='records')

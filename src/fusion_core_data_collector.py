@@ -7,7 +7,7 @@ class FusionCoreDataCollector:
     def __init__(self):
         pass
 
-    def collect_point_scan_data(self, scanner, ai_history, final_report_md):
+    def collect_point_scan_data(self, scanner, ai_history, final_candidates, final_report_md):
         # 1. 마지막 응답 확보 (태그 추출용)
         # ai_history는 <think>가 제거된 정제된 기록입니다.
         final_ai_msg = ai_history[-1]["content"] if ai_history else ""
@@ -45,6 +45,10 @@ class FusionCoreDataCollector:
                 "exported_at": datetime.now().isoformat(),
                 "num_cpus": getattr(scanner.data_provider, 'num_cpus', 8)
             },
+            "investigation_leads": {
+                "top_candidates": final_candidates,
+                "thought_trail_summary": [t['thought'][:300] for t in scanner.ai_analyst.thought_archive]
+            },
             "target_window": {
                 "start_ns": scanner.scope_stack[-1][1][0] if scanner.scope_stack else 0,
                 "end_ns": scanner.scope_stack[-1][1][1] if scanner.scope_stack else 0,
@@ -52,8 +56,7 @@ class FusionCoreDataCollector:
             },
             "targeting": {
                 "backtrack_count": getattr(scanner, 'backtrack_count', 0),
-                "confidence_score": 0.95 if "🔴" in extract_tag("V") else 0.75,
-                "pivot_candidates": getattr(scanner.data_provider, 'pivot_candidates', [])
+                "confidence_csore": 0.95 if "🔴" in extract_tag("V") else 0.75
             },
             "compression_guide": {
                 "investigated_depth": len(scanner.scope_stack),

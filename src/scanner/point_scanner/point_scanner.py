@@ -7,7 +7,7 @@ from scanner.base_scanner import BaseScanner
 class PointScanner(BaseScanner):
     def __init__(self):
         super().__init__()
-        self.max_round = 8
+        self.max_round = 5
         self.backtrack_limit = 2  # 💡 백트랙 최대 허용 횟수
         self.backtrack_count = 0  # 💡 현재 백트랙 누적 횟수
         self.target_package = None
@@ -34,25 +34,29 @@ class PointScanner(BaseScanner):
         self.data_provider.init(trace_normal, trace_slow, target_package)
         self.output_callback(f"🚀 [Point-Scan] Investigation Started: {target_package}")
         
-        # 1. 타겟 락온 및 ID 생성
+        # ---------------------------------------------------------
+        # 1. 수사 대상 확정 (Targeting & Identification)
+        # ---------------------------------------------------------
         self.utid_n, self.utid_s, self.target_thread = self.data_provider.identify_targets()
         if not self.target_thread:
             self.output_callback("❌ Fail: Could not identify target threads.", True)
             return
             
+        # 수사 고유 ID 생성 (추적성 확보)
         investigation_id = f"FC-{datetime.now().strftime('%m%d-%H%M')}"
         self.output_callback(f"🎯 [Target Locked] Thread: {self.target_thread} | ID: {investigation_id}", True)
 
-        # 2. 피봇 슬라이스 정찰 (Worst-case 탐색)
+        # ---------------------------------------------------------
+        # 2. 초기 정찰 (Initial Reconnaissance)
+        # ---------------------------------------------------------
+        # 가장 지연이 심한 '피봇(Pivot)' 슬라이스를 찾아 수사 범위(Scope)를 압축
         pivot = self.data_provider.find_worst_slice(self.utid_n, self.utid_s)
 
-        # 3. 피봇 기반 스코프 확정 (Temporal 레벨)
-        ts_s = None
-        ts_n = None
+        ts_s, ts_n = None, None
         if pivot:
             ts_s = self.data_provider.get_slice_bounds("slow", self.utid_s, pivot)
 
-        # [Safety Check] 피봇을 찾았더라도 좌표 조회에 실패하면 전체 범위로 자동 전환
+        # [Safety Check] 피봇 좌표 조회 실패 시 전체 범위(Global)로 자동 전환
         if ts_s:
             ts_n = self.data_provider.get_sync_bounds("normal", ts_s)
             self.output_callback(f"🎯 [Focus Mode] Investigating '{pivot}' window.", True)
@@ -61,27 +65,32 @@ class PointScanner(BaseScanner):
             ts_n = self.data_provider.get_sync_bounds("normal", ts_s)
             self.output_callback("🌐 [Global Mode] No specific pivot found. Analyzing full trace.", True)
 
+        # 수사 이력 관리를 위한 스코프 스택 초기화
         self.scope_stack.append((ts_n, ts_s)) 
-        
         cfs_block = self.data_provider.generate_cfs(self.utid_n, ts_n, self.utid_s, ts_s)
         
+        # ---------------------------------------------------------
+        # 3. AI 협업 순환 분석 (Iterative AI Analysis)
+        # ---------------------------------------------------------
         current_round = 1
         while current_round <= self.max_round:
             is_final_round = (current_round == self.max_round)
             self.output_callback(f"\n📡 [Round {current_round}/{self.max_round}] Analyzing...")
 
+            # 최종 라운드일 경우 강제 종결 지침(Mandate) 주입
             current_cfs = cfs_block
             if is_final_round:
-                # 8라운드일 때 AI에게 보내는 메시지에 '마지막 경고'를 섞음
                 current_cfs += (
-                    "\n\n🚨 [SYSTEM MANDATE: FINAL ROUND] 🚨\n"
-                    "This is the 8th and FINAL round. You CANNOT request [NEXT_TARGET] anymore.\n"
-                    "You MUST conclude the investigation NOW and output [FINAL_DATA] (V, O, C, A, S, T) based on collected evidence."
+                    f"\n\n🚨 [SYSTEM MANDATE: FINAL ROUND {current_round}/{self.max_round}] 🚨\n"
+                    "You MUST conclude the investigation NOW.\n"
+                    "Output [FINAL_DATA] tags (V, O, C, A, S, T) based on evidence."
                 )
             
+            # AI 분석 요청 및 결과 파싱
             ai_response = self.ai_analyst.request_analysis(current_round, current_cfs)
-
-            # 생각 모드(<think>)와 일반 모드([REASONING])를 모두 지원하는 멀티 파싱
+            target_slice = self.ai_analyst.parse_slice_request(ai_response)
+            
+            # 사고 과정(<think>) 추출 및 UI 피드백
             thought_process = "Analyzing..."
             think_match = re.search(r"<think>(.*?)</think>", ai_response, re.S)
             reasoning_match = re.search(r"\[REASONING\]:(.*?)(?=\[|$)", ai_response, re.S)
@@ -91,20 +100,19 @@ class PointScanner(BaseScanner):
             elif reasoning_match:
                 thought_process = reasoning_match.group(1).strip()
 
-            # UI 출력: 너무 길면 앞부분만 살짝 보여주거나, 스트리밍이므로 그대로 출력
             self.output_callback(f"🤖 [Thinking] {thought_process}")
 
-            # 다음 수사 타겟 추출
-            target_slice = self.ai_analyst.parse_slice_request(ai_response)
-            
-            # [종결 조건]
+            # [CASE A: 수사 종결] 자발적 종료 혹은 최대 라운드 도달
             if not target_slice or "Case Closed" in target_slice or is_final_round:
                 if is_final_round:
                     self.output_callback("⚠️ [Hard-Stop] Max rounds reached. Synthesizing data...", True)
 
+                # 최종 증거 데이터 및 부가 메타데이터(스케줄링/프로파일) 수집
+                final_candidates = self.data_provider.get_evidential_candidates(self.utid_n, self.utid_s)
                 sched_md = self.data_provider.check_thread_scheduling(self.target_thread)
                 profile_md = self.data_provider.profile_thread_functions(self.target_thread)
 
+                # 부검 리포트 생성 및 데이터 아카이빙(JSON)
                 final_report = self.build_final_report(
                     ai_response, sched_md, profile_md, investigation_id, self.target_thread
                 )
@@ -112,7 +120,8 @@ class PointScanner(BaseScanner):
                 try:
                     json_path = self.data_collector.collect_point_scan_data(
                         scanner=self, 
-                        ai_history=self.ai_analyst.history, 
+                        ai_history=self.ai_analyst.history,
+                        final_candidates=final_candidates,
                         final_report_md=final_report
                     )
                     self.output_callback(f"✅ [Handover] Point-Scan Investigation Sealed: {json_path}", True)
@@ -122,14 +131,14 @@ class PointScanner(BaseScanner):
                 self.output_callback(final_report)
                 break
 
-            # 백트랙 처리 (Pivot & Purge)
+            # [CASE B: 백트랙] 가설 파괴로 인한 이전 경로 회귀
             if "Backtrack" in target_slice:
                 if self.backtrack_count < self.backtrack_limit:
                     self.backtrack_count += 1
                     self.output_callback(f"🔄 Backtrack ({self.backtrack_count}/{self.backtrack_limit})")
                     
                     if len(self.scope_stack) > 1:
-                        self.scope_stack.pop() 
+                        self.scope_stack.pop() # 이전 스코프로 복원
                         self.ai_analyst.trim_last_cfs_data() 
                     
                     ts_n, ts_s = self.scope_stack[-1]
@@ -137,7 +146,7 @@ class PointScanner(BaseScanner):
                         self.utid_n, ts_n, self.utid_s, ts_s, exclude_scopes=self.investigated_scopes
                     )
                 else:
-                    # 🚨 백트랙 한도 초과: 동일 스코프 유지하며 AI 압박
+                    # 백트랙 한도 초과 시 AI에게 현재 스코프 고수 압박
                     self.output_callback("🚫 [Hard-Limit] Backtrack limit reached! Forcing AI to stay on path.", True)
                     cfs_block = ("⚠️ [Notice] Backtrack limit (2/2) reached. You MUST proceed with current data. "
                                  f"Re-analyze current scope: {self.scope_stack[-1]}")
@@ -145,7 +154,7 @@ class PointScanner(BaseScanner):
                 current_round += 1
                 continue
 
-            # 3. 새로운 타겟 슬라이스 탐색 (Targeted Strike)
+            # [CASE C: 정밀 타격] 새로운 하위 슬라이스로 수사 범위 좁히기 (Drill-down)
             new_ts_n = self.data_provider.get_slice_bounds("normal", self.utid_n, target_slice)
             new_ts_s = self.data_provider.get_slice_bounds("slow", self.utid_s, target_slice)
 
@@ -154,6 +163,7 @@ class PointScanner(BaseScanner):
             self.output_callback(f"🎯 [Targeted Strike] {target_slice} | N:{n_str} | S:{s_str}", True)
 
             if new_ts_s:
+                # 중복 분석 방지 및 스택 업데이트
                 scope_key = (tuple(new_ts_n or []), tuple(new_ts_s))
                 if scope_key in self.investigated_scopes:
                     cfs_block = f"⚠️ [Notice] '{target_slice}' already analyzed. Pivot to a different Sibling or 'Backtrack'."
@@ -164,6 +174,7 @@ class PointScanner(BaseScanner):
                     self.output_callback(f"✅ Data Refined: {target_slice}", True)
                 current_round += 1
             else:
+                # 슬라이스 탐색 실패 시 에러 피드백
                 cfs_block = f"⚠️ [Error] Slice '{target_slice}' not found. Check names or 'Backtrack'."
                 current_round += 1
 
@@ -228,6 +239,6 @@ class PointScanner(BaseScanner):
             f"{actions}\n\n"
             
             f"---\n"
-            f"*Reported by FusionCore 3.0 Sniper Engine (Qwen3-8B)*\n"
+            f"*Reported by FusionCore 3.0 Sniper Engine*\n"
         )
         return report
