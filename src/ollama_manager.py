@@ -28,7 +28,7 @@ class OllamaManager:
             "temperature": 0.2,
             "top_p": 0.9,
             "repeat_penalty": 1.2,
-            "num_predict": 2048,
+            "num_predict": 4096,
             "mirostat": 0,
             "low_vram": True
         }

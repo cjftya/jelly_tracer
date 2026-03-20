@@ -7,294 +7,292 @@ class PointScanDataDelegate:
         self._common_api = None
         self.utid_n = None
         self.utid_s = None
+        self.ts_n = None # Normal 트레이스 전체 시간 범위 [start, end]
+        self.ts_s = None # Slow 트레이스 전체 시간 범위 [start, end]
+        self.target_thread = None
         self.output_callback = output_callback
-        self.num_cpus = 8  # 기본값, init에서 동적 업데이트
 
     def init(self, trace_normal, trace_slow, target_package):
         self._common_api = CommonAPI(trace_normal, trace_slow, target_package)
+
+        # 초기화 시점에 각 트레이스의 전체 시간 경계를 구합니다.
+        self.ts_n = self.get_global_bounds("normal")
+        self.ts_s = self.get_global_bounds("slow")
         
-        # 시스템 코어 수 미리 파악 (CPU Load 계산 오버헤드 방지)
-        try:
-            res = self._common_api.tp_s.query("SELECT MAX(cpu) + 1 FROM sched").as_pandas_dataframe()
-            if not res.empty and pd.notna(res.iloc[0, 0]):
-                self.num_cpus = int(res.iloc[0, 0])
-        except Exception:
-            self.num_cpus = 8
+        if not self.ts_n or not self.ts_s:
+            self.output_callback("⚠️ [Warning] Failed to retrieve global trace bounds.")
 
     def identify_targets(self):
         self.output_callback("🔍 [Targeting] Identifying primary investigation targets...", True)
 
-        res_n = self.get_thread_candidates(self._common_api.tp_n, self._common_api.upid_n)
-        res_s = self.get_thread_candidates(self._common_api.tp_s, self._common_api.upid_s)
-
-        if res_n is None or res_s is None:
-            missing = "NORMAL" if res_n is None else "SLOW"
-            if res_n is None and res_s is None: missing = "BOTH"
-            self.output_callback(f"🚨 [CRITICAL] Package data not found in {missing} trace.", True)
+        # 1. Slow 트레이스에서 지연 임팩트가 가장 큰 범인(Culprit) 추출
+        res_s = self.get_thread_candidates(self._common_api.tp_s, self._common_api.upid_s, self.ts_s)
+        
+        if res_s is None or res_s.empty:
+            self.output_callback("🚨 [CRITICAL] No active threads found in SLOW trace.", True)
             return None, None, None
 
-        # Slow 트레이스에서 지연의 핵심 주범(1위) 선택
         target_row_s = res_s.iloc[0]
         self.target_thread = target_row_s['thread_name']
         self.utid_s = int(target_row_s['utid'])
+        
+        self.output_callback(f"🕵️‍♂️ [Suspect Identified] '{self.target_thread}' (Score: {target_row_s['total_score']:.1f})", True)
 
-        # Normal 트레이스에서 동일 이름 스레드 매칭
+        # 2. Normal 트레이스에서 대조군 후보군 추출
+        res_n = self.get_thread_candidates(self._common_api.tp_n, self._common_api.upid_n, self.ts_n)
+
+        if res_n is None or res_n.empty:
+            self.output_callback("🚨 [CRITICAL] Package data not found in NORMAL trace.", True)
+            return None, None, None
+
+        # 3. [Strict Match] 이름 기반 동일 스레드 매칭
         match_n = res_n[res_n['thread_name'] == self.target_thread]
 
-        if not match_n.empty:
-            self.utid_n = int(match_n.iloc[0]['utid'])
-            self.output_callback(f"🎯 [Target Locked] {self.target_thread} (Name Matched)", True)
-        else:
-            # Fallback: 이름 불일치 시 활동성 기반 강제 매칭
-            target_row_n = res_n.iloc[0]
-            self.utid_n = int(target_row_n['utid'])
-            self.output_callback(f"⚠️ [NOTICE] Thread name mismatch. Matching by activity score.", True)
-            self.output_callback(f"   - (N): {target_row_n['thread_name']} <-> (S): {self.target_thread}", True)
+        if match_n.empty:
+            self._abort_investigation("Thread Name Mismatch", f"Target '{self.target_thread}' not found in Normal trace.")
+            return None, None, None
+
+        self.utid_n = int(match_n.iloc[0]['utid'])
+
+        # 4. [Structural Check] 내부 슬라이스 유사도(유전자) 검사
+        similarity = self.check_thread_similarity(self.utid_n, self.utid_s)
         
+        if similarity > 0.7:
+            status = "✅ [High Confidence]"
+        elif similarity > 0.35:
+            status = "⚠️ [Moderate Confidence]"
+        else:
+            self._abort_investigation("Structural Inconsistency", f"Similarity too low ({similarity:.1%}).")
+            return None, None, None
+
+        self.output_callback(f"{status} Baseline Matched. (Similarity: {similarity:.1%})", True)
         return self.utid_n, self.utid_s, self.target_thread
 
-    def generate_cfs(self, utid_n, ts_n, utid_s, ts_s, exclude_scopes=None):
-        def get_metrics(tp, utid, ts):
-            if ts is None or len(ts) < 2: return "R?,Rn?,S?,D?|L:NoData|C:Unknown"
-            duration_ns = ts[1] - ts[0]
-            if duration_ns <= 0: return "R0,Rn0,S0,D0|L:None|C:InvalidRange"
+    def get_l1_delta_packages(self):
+        if not self.utid_s or not self.utid_n:
+            return "🚨 [Error] Target threads not identified. Run identify_targets() first."
 
-            # 1. 스케줄링 상태 및 로드 계산
-            query_sched = f"""
-                SELECT state, SUM(dur) * 100.0 / ({self.num_cpus} * {duration_ns}) as ratio
-                FROM sched WHERE utid = {utid} AND ts >= {ts[0]} AND ts < {ts[1]} GROUP BY state
-            """
-            states = {'Running': 0, 'R': 0, 'S': 0, 'D': 0}
-            try:
-                sched_df = tp.query(query_sched).as_pandas_dataframe()
-                for _, row in sched_df.iterrows():
-                    s = row['state']
-                    val = round(row['ratio'], 1)
-                    if s == 'Running': states['Running'] = val
-                    elif s == 'R': states['R'] = val
-                    elif s == 'S': states['S'] = val
-                    elif s in ['D', 'DK']: states['D'] = val
-            except Exception: pass
-
-            # 2. [Rule B 판단 로직] 시스템 전체 로드(Load) vs 프로세스 내부 경합(ProcLoad)
-            # 여기서는 예시로 Running + R 비중이 높으면 Load로 판정하는 로직을 심습니다.
-            total_load = states['Running'] + states['R']
-            load_tag = "Load" if total_load > 80 else "ProcLoad"
-            if total_load < 20: load_tag = "Normal"
-
-            # 3. 주요 슬라이스(L:) 추출
-            query_slice = f"""
-                SELECT name, SUM(dur)/1e6 as sum_ms FROM slice 
-                WHERE track_id IN (SELECT id FROM thread_track WHERE utid = {utid})
-                AND ts >= {ts[0]} AND ts < {ts[1]} GROUP BY 1 ORDER BY 2 DESC LIMIT 5
-            """
-            try:
-                slice_df = tp.query(query_slice).as_pandas_dataframe()
-                l_str = ", ".join([f'"{r["name"]}"({r["sum_ms"]:.1f}ms)' for _, r in slice_df.iterrows()]) if not slice_df.empty else "No_Slices"
-            except Exception: l_str = "Error"
-
-            # 결과 조립: C: 태그 뒤에 load_tag를 붙여 Rule B를 선택하게 함
-            return f"R{states['Running']},Rn{states['R']},S{states['S']},D{states['D']}|L:[{l_str}]|C:{load_tag}"
-
-        return (f"### [FORENSIC DATA]\n"
-                f"- NORMAL: {get_metrics(self._common_api.tp_n, utid_n, ts_n)}\n"
-                f"- SLOW: {get_metrics(self._common_api.tp_s, utid_s, ts_s)}")
-    
-    def get_thread_candidates(self, tp, upid, global_ts=None):
-        if tp is None or upid is None: return None
-        ts_filter = f"AND ts >= {global_ts[0]} AND ts < {global_ts[1]}" if global_ts else ""
-
-        # Runnable(R) 뿐만 아니라 D-State(D, DK) 가중치 반영
-        query = f"""
-            SELECT t.utid, t.name AS thread_name, (
-                (CASE WHEN t.name = p.name THEN 150 ELSE 0 END) +
-                (CASE WHEN EXISTS (
-                    SELECT 1 FROM slice s JOIN thread_track tt ON s.track_id = tt.id
-                    WHERE tt.utid = t.utid {ts_filter}
-                    AND (s.name LIKE 'Choreographer%' OR s.name LIKE 'doFrame%') LIMIT 1
-                ) THEN 250 ELSE 0 END) +
-                COALESCE((SELECT SUM(dur)/1e6 FROM thread_state ts 
-                    WHERE ts.utid = t.utid 
-                    AND ts.state IN ('R', 'D', 'DK') {ts_filter}), 0) * 0.05
-            ) AS total_score
-            FROM thread t JOIN process p USING(upid)
-                WHERE p.upid = {upid} ORDER BY total_score DESC;
-            """
-        return tp.query(query).as_pandas_dataframe()
+        # 1. 지연 임팩트가 가장 큰 Worst 3 지점 탐색
+        worst_roots = self._find_worst_slices(self.utid_n, self.utid_s)
+        if not worst_roots:
+            return "⚠️ [Notice] No significant regression found in the target thread."
         
-    def find_worst_slice(self, utid_n, utid_s):
-        self.output_callback("🛰️ [Initial Scan] Searching for the most delayed pivot slice...", True)
+        all_case_reports = []
+        for i, root in enumerate(worst_roots):
+            # 2. 시간 범위 확정 (없을 경우 전체에서 검색)
+            ts_range = (root['ts'], root['ts_end']) if 'ts' in root else self._get_default_range(root['name'])
+            
+            tree_text = self._build_delta_tree_recursive(
+                name=root['name'],
+                ts_s=ts_range,
+                depth=1
+            )
+            
+            report = f"### [CASE {i+1}: {root['name']}]\n"
+            report += f"- Total Impact Score: {root['impact']:.1f}\n"
+            report += f"```text\n{tree_text}```"
+            all_case_reports.append(report)
 
-        dur_n = self.get_total_dur(self._common_api.tp_n)
-        dur_s = self.get_total_dur(self._common_api.tp_s)
+        return "\n\n".join(all_case_reports)
 
-        query_s = f"""
-            SELECT name, SUM(dur)/1e6 as total_ms 
-            FROM slice 
-            WHERE track_id = (SELECT id FROM thread_track WHERE utid = {utid_s} LIMIT 1)
-            AND dur > 0 GROUP BY 1 ORDER BY 2 DESC LIMIT 15
+    def _build_delta_tree_recursive(self, name, ts_s, depth):
+        if depth > 3: return ""
+
+        # A. Slow 및 Normal 데이터 추출
+        s_metrics = self._get_node_metrics(self._common_api.tp_s, self.utid_s, name, ts_s)
+        n_metrics = self._get_node_metrics(self._common_api.tp_n, self.utid_n, name) # Normal은 전체에서 Baseline 검색
+
+        if not s_metrics: return ""
+
+        # B. 델타 및 태그 계산
+        s_dur = s_metrics['dur']
+        n_dur = n_metrics['dur'] if n_metrics else 0
+        delta = s_dur - n_dur
+        tag = self._get_impact_tag(delta, n_metrics is None, s_metrics['count'])
+        
+        # C. 텍스트 포맷팅
+        indent = "  " * (depth - 1)
+        prefix = "|-- " if depth > 1 else "- "
+        n_dur_str = f"{n_dur:.1f}" if n_metrics else "N/A"
+        n_state_str = n_metrics['state'] if n_metrics else "N/A"
+        
+        node_line = (f"{indent}{prefix}[L{depth}] {name} | "
+                    f"{s_dur:.1f} ({n_dur_str}) | Δ{delta:+.1f} | "
+                    f"Self:{s_metrics['self']:.1f} | Wait:{s_metrics['wait']:.1f} | "
+                    f"{s_metrics['state']}({n_state_str}) | CPU:{s_metrics['cpu']}% | "
+                    f"n:{s_metrics['count']} | {tag}\n")
+
+        # D. 자식 노드 탐색 (Slow 기준)
+        child_texts = ""
+        if depth < 3:
+            children = self._get_children(self._common_api.tp_s, self.utid_s, ts_s)
+            for _, child in children.iterrows():
+                child_texts += self._build_delta_tree_recursive(
+                    child['name'], (child['ts'], child['ts'] + child['dur']), depth + 1
+                )
+
+        return node_line + child_texts
+
+    def _get_node_metrics(self, tp, utid, name, ts_range=None):
+        clean_name = name.replace("'", "''")
+        time_filter = f"AND ts >= {ts_range[0]} AND ts <= {ts_range[1]}" if ts_range else ""
+        
+        query = f"""
+            SELECT ts, dur, (SELECT SUM(dur) FROM slice WHERE parent_id = s.id) as child_dur
+            FROM slice s WHERE track_id IN (SELECT id FROM thread_track WHERE utid = {utid})
+            AND name = '{clean_name}' {time_filter} ORDER BY dur DESC LIMIT 1
         """
-        df_s = self._common_api.tp_s.query(query_s).as_pandas_dataframe()
-        if df_s.empty: return None
+        res = tp.query(query).as_pandas_dataframe()
+        if res.empty: return None
 
-        worst_slice, max_impact = None, 0
+        ts, dur, c_dur = res.iloc[0]['ts'], res.iloc[0]['dur'] / 1e6, (res.iloc[0]['child_dur'] or 0) / 1e6
+        
+        # Thread State (Wait/CPU)
+        state_query = f"""
+            SELECT state, SUM(dur)/1e6 as state_dur
+            FROM thread_state WHERE utid = {utid} AND ts >= {ts} AND ts <= {ts + (dur*1e6)}
+            GROUP BY 1 ORDER BY 2 DESC
+        """
+        st_res = tp.query(state_query).as_pandas_dataframe()
+        wait_time = st_res[st_res['state'] == 'R']['state_dur'].sum()
+        run_time = st_res[st_res['state'] == 'Running']['state_dur'].sum()
+        dominant_state = st_res.iloc[0]['state'][0].upper() if not st_res.empty else "U"
+        
+        # Count (n)
+        count_query = f"SELECT COUNT(*) as cnt FROM slice WHERE track_id IN (SELECT id FROM thread_track WHERE utid = {utid}) AND name = '{clean_name}' {time_filter}"
+        count = tp.query(count_query).as_pandas_dataframe().iloc[0]['cnt']
 
-        for _, row in df_s.iterrows():
-            safe_name = row['name'].replace("'", "''")
-            slow_ms = row['total_ms']
-            slow_ratio = slow_ms / dur_s
+        return {
+            'dur': dur, 'self': max(0, dur - c_dur), 'wait': wait_time,
+            'state': dominant_state, 'cpu': int((run_time / dur * 100)) if dur > 0 else 0,
+            'count': count
+        }
 
-            query_n = f"""
-                SELECT SUM(dur)/1e6 as total_ms FROM slice 
-                WHERE track_id = (SELECT id FROM thread_track WHERE utid = {utid_n} LIMIT 1)
-                AND name = '{safe_name}'
-            """
-            df_n = self._common_api.tp_n.query(query_n).as_pandas_dataframe()
-            n_ms_val = df_n.iloc[0]['total_ms'] if not df_n.empty else 0
-            n_ms = n_ms_val if pd.notna(n_ms_val) and n_ms_val > 0 else 0.01
-            normal_ratio = n_ms / dur_n
+    def _find_worst_slices(self, utid_n, utid_s, limit=3):
+        self.output_callback("🛰️ [Initial Scan] Searching for top 3 regression pivots...", True)
 
-            # Impact Score = Ratio * Delta
-            ratio = slow_ratio / normal_ratio
-            delta_ms = slow_ms - n_ms
-            impact_score = ratio * delta_ms
-
-            if slow_ms > 2.0 and impact_score > max_impact:
-                max_impact = impact_score
-                worst_slice = row['name']
-
-        if worst_slice:
-            self.output_callback(f"🚩 [Pivot Found] '{worst_slice}' (Impact Score: {max_impact:.1f})", True)
-        return worst_slice
-
-    def get_evidential_candidates(self, utid_n, utid_s, limit=3):
-        self.output_callback(f"🛰️ [Multi-Scan] Extracting top {limit} candidate leads...", True)
-
-        dur_n = self.get_total_dur(self._common_api.tp_n)
-        dur_s = self.get_total_dur(self._common_api.tp_s)
-
-        # 1. Slow 트레이스에서 주요 슬라이스 15개 추출
+        # 1. Slow 트레이스에서 실행 시간이 긴 후보들 추출
         query_s = f"""
-            SELECT name, SUM(dur)/1e6 as total_ms 
+            SELECT name, SUM(dur)/1e6 as slow_ms, MAX(ts) as ts, MAX(ts + dur) as ts_end
             FROM slice 
-            WHERE track_id = (SELECT id FROM thread_track WHERE utid = {utid_s} LIMIT 1)
-            AND dur > 0 GROUP BY 1 ORDER BY 2 DESC LIMIT 15
+            WHERE track_id IN (SELECT id FROM thread_track WHERE utid = {utid_s})
+            AND dur > 0 GROUP BY 1 ORDER BY 2 DESC LIMIT 30
         """
         df_s = self._common_api.tp_s.query(query_s).as_pandas_dataframe()
         if df_s.empty: return []
 
-        full_candidates = []
+        # 2. SQL IN 절을 위한 이름 리스트 포매팅 (작은따옴표 이스케이프 포함)
+        names_list = df_s['name'].tolist()
+        formatted_names = ", ".join(["'" + n.replace("'", "''") + "'" for n in names_list])
+        name_filter = f"name IN ({formatted_names})" if names_list else "1=0"
+        
+        # 3. Normal 트레이스에서 동일한 이름의 슬라이스 시간 조회
+        query_n = f"""
+            SELECT name, SUM(dur)/1e6 as normal_ms 
+            FROM slice 
+            WHERE track_id IN (SELECT id FROM thread_track WHERE utid = {utid_n}) 
+            AND {name_filter} 
+            GROUP BY 1
+        """
+        df_n = self._common_api.tp_n.query(query_n).as_pandas_dataframe()
 
-        for _, row in df_s.iterrows():
-            name = row['name']
-            safe_name = name.replace("'", "''")
-            slow_ms = row['total_ms']
-            slow_ratio = (slow_ms / dur_s) * 100
+        # 4. 데이터 병합 및 타입 안정성 확보 (FutureWarning 방지)
+        df_merged = pd.merge(df_s, df_n, on='name', how='left')
+        # Pandas 최신 버전 대응: 다운캐스팅 경고 방지
+        df_merged = df_merged.infer_objects(copy=False)
+        df_merged = df_merged.fillna(0)
 
-            # 2. Normal 트레이스 대조 데이터 확보
-            query_n = f"""
-                SELECT SUM(dur)/1e6 as total_ms FROM slice 
-                WHERE track_id = (SELECT id FROM thread_track WHERE utid = {utid_n} LIMIT 1)
-                AND name = '{safe_name}'
-            """
-            df_n = self._common_api.tp_n.query(query_n).as_pandas_dataframe()
-            n_ms_val = df_n.iloc[0]['total_ms'] if not df_n.empty else 0
-            n_ms = n_ms_val if pd.notna(n_ms_val) and n_ms_val > 0 else 0.01
-            normal_ratio = (n_ms / dur_n) * 100
+        # 5. 임팩트 스코어 계산 (지연 시간 * 지연 비율)
+        df_merged['delta'] = df_merged['slow_ms'] - df_merged['normal_ms']
+        df_merged['ratio'] = df_merged['slow_ms'] / (df_merged['normal_ms'] + 0.1)
+        df_merged['impact_score'] = df_merged['delta'] * df_merged['ratio']
+        
+        # 점수가 높은 순으로 정렬
+        df_merged = df_merged.sort_values(by='impact_score', ascending=False)
 
-            # 3. 임팩트 및 델타 계산
-            delta_ms = slow_ms - n_ms
-            ratio_increase = slow_ratio / normal_ratio if normal_ratio > 0 else 100
+        # 6. 최종 Worst 3 선정 (지연이 발생한 경우만)
+        final_worst_list = []
+        for _, row in df_merged.iterrows():
+            if len(final_worst_list) >= limit: break
             
-            # Evidence 객체 생성
-            if delta_ms > 1.0: # 유의미한 차이가 있는 것만 수집
-                # 🎯 [핵심 수정] None 대신 실제 슬라이스의 좌표를 정밀하게 확보
-                cand_ts_s = self.get_slice_bounds("slow", utid_s, name)
-                cand_ts_n = self.get_sync_bounds("normal", cand_ts_s) if cand_ts_s else None
-
-                full_candidates.append({
-                    "name": name,
-                    "delta_ms": round(delta_ms, 2),
-                    "ratio_inc": round(ratio_increase, 1),
-                    "slow_share": round(slow_ratio, 1),
-                    "parent_context": self._get_parent_slice(utid_s, name), # 👈 부모 슬라이스 정보 추가
-                    "is_binder": self._check_binder_dependency(utid_s, name), # 👈 Binder 대기 여부 추가
-                    "evidence": self.generate_cfs(utid_n, cand_ts_n, utid_s, cand_ts_s)
+            # 최소 실행 시간 1ms 이상이고, '정상'보다 조금이라도 느려진 것만 포함
+            if row['slow_ms'] >= 1.0 and row['impact_score'] > 0:
+                final_worst_list.append({
+                    'name': row['name'], 
+                    'impact': row['impact_score'],
+                    'ts': int(row['ts']), 
+                    'ts_end': int(row['ts_end']),
+                    'slow_ms': row['slow_ms'], 
+                    'delta': row['delta']
                 })
+                self.output_callback(f"🚩 [Pivot {len(final_worst_list)}] '{row['name']}' (Impact: {row['impact_score']:.1f})", True)
+        
+        return final_worst_list
 
-        # 4. 임팩트 순 정렬 후 상위 리미트만큼 반환 (경쟁 가능한 후보 집합)
-        full_candidates.sort(key=lambda x: x['delta_ms'], reverse=True)
-        return full_candidates[:limit]
-
-    def get_total_dur(self, tp):
-        try:
-            res = tp.query("SELECT (end_ts - start_ts)/1e6 as dur FROM trace_bounds").as_pandas_dataframe()
-            return res.iloc[0, 0] if not res.empty and pd.notna(res.iloc[0, 0]) else 1.0
-        except Exception: return 1.0
-
-    def _get_parent_slice(self, utid, name):
-        safe_name = name.replace("'", "''")
+    def _get_children(self, tp, utid, ts_range):
+        # 정확한 ts 매칭보다는 부모-자식 관계(parent_id)나 계층 범위를 활용
         query = f"""
-            SELECT p.name 
-            FROM slice s
-            JOIN slice p ON s.parent_id = p.id
-            WHERE s.track_id IN (SELECT id FROM thread_track WHERE utid = {utid})
-            AND s.name = '{safe_name}'
-            LIMIT 1
-        """
-        try:
-            res = self._common_api.tp_s.query(query).as_pandas_dataframe()
-            return res.iloc[0]['name'] if not res.empty else "Root/None"
-        except:
-            return "Unknown"
-
-    def _check_binder_dependency(self, utid, name):
-        safe_name = name.replace("'", "''")
-        # 해당 슬라이스의 시간 범위를 먼저 확보
-        query_range = f"""
-            SELECT ts, dur FROM slice 
+            SELECT name, ts, dur FROM slice 
             WHERE track_id IN (SELECT id FROM thread_track WHERE utid = {utid})
-            AND name = '{safe_name}' ORDER BY dur DESC LIMIT 1
+            AND ts >= {ts_range[0]} AND (ts + dur) <= {ts_range[1]}
+            AND depth = (SELECT depth + 1 FROM slice 
+                        WHERE track_id IN (SELECT id FROM thread_track WHERE utid = {utid})
+                        AND ts >= {ts_range[0]} AND ts <= {ts_range[0]} + 1000 LIMIT 1)
+            ORDER BY dur DESC LIMIT 5
         """
-        try:
-            range_res = self._common_api.tp_s.query(query_range).as_pandas_dataframe()
-            if range_res.empty: return False
-            
-            ts, dur = range_res.iloc[0]['ts'], range_res.iloc[0]['dur']
-            
-            # 해당 시간 범위 내에 'binder transaction' 관련 슬라이스가 있는지 확인
-            query_binder = f"""
-                SELECT 1 FROM slice 
-                WHERE track_id IN (SELECT id FROM thread_track WHERE utid = {utid})
-                AND (name LIKE 'binder%' OR name LIKE 'reply %')
-                AND ts >= {ts} AND ts <= {ts + dur}
-                LIMIT 1
-            """
-            binder_res = self._common_api.tp_s.query(query_binder).as_pandas_dataframe()
-            return not binder_res.empty
-        except:
-            return False
+        return tp.query(query).as_pandas_dataframe()
+
+    def _get_default_range(self, name):
+        res = self.get_slice_bounds("slow", self.utid_s, name)
+        return tuple(res) if res else (0, 0)
+
+    def _get_impact_tag(self, delta, is_new, count):
+        if is_new: return "[NEW_ENTRY] 🔥"
+        if delta > 50: return "[CRITICAL] 💥"
+        if delta > 10: return "[REGRESSION]"
+        if count > 10: return "[LOOP_DETECTED]"
+        return "[NORMAL]"
+
+    def get_thread_candidates(self, tp, upid, global_ts=None):
+        if tp is None or upid is None: return None
+        ts_filter = f"AND ts >= {global_ts[0]} AND ts < {global_ts[1]}" if global_ts else ""
+        query = f"""
+            SELECT t.utid, t.name AS thread_name, (
+                (CASE WHEN t.name = p.name THEN 150 ELSE 0 END) +
+                (CASE WHEN EXISTS (SELECT 1 FROM slice s JOIN thread_track tt ON s.track_id = tt.id WHERE tt.utid = t.utid {ts_filter} AND (s.name LIKE 'Choreographer%' OR s.name LIKE 'doFrame%') LIMIT 1) THEN 250 ELSE 0 END) +
+                COALESCE((SELECT SUM(dur)/1e6 FROM thread_state ts WHERE ts.utid = t.utid AND ts.state IN ('R', 'D', 'DK') {ts_filter}), 0) * 0.05
+            ) AS total_score FROM thread t JOIN process p USING(upid) WHERE p.upid = {upid} ORDER BY total_score DESC;
+        """
+        return tp.query(query).as_pandas_dataframe()
+
+    def check_thread_similarity(self, utid_n, utid_s):
+        def get_slice_set(tp, utid):
+            query = f"SELECT DISTINCT name FROM slice WHERE track_id IN (SELECT id FROM thread_track WHERE utid = {utid}) LIMIT 100"
+            df = tp.query(query).as_pandas_dataframe()
+            return set(df['name']) if not df.empty else set()
+        set_n, set_s = get_slice_set(self._common_api.tp_n, utid_n), get_slice_set(self._common_api.tp_s, utid_s)
+        if not set_n or not set_s: return 0.0
+        return len(set_n & set_s) / len(set_n | set_s)
+
+    def _abort_investigation(self, reason, detail):
+        self.output_callback(f"\n❌ [ANALYSIS ABORTED] {reason}\n   - {detail}\n" + "-"*50 + "\n💡 재추출 가이드: 시나리오 일치 확인 및 Normal 실행 데이터 확보 필요.\n" + "-"*50, True)
 
     def get_global_bounds(self, tp_type="slow"):
         tp = self._common_api.tp_s if tp_type == "slow" else self._common_api.tp_n
         if tp is None: return None
         
         try:
-            # trace_bounds는 min/max가 필요 없습니다. 
-            # 이미 단 한 줄의 [start_ts, end_ts]가 들어있는 테이블이기 때문입니다.
+            # 1. 표준 trace_bounds 테이블 확인
             res = tp.query("SELECT start_ts, end_ts FROM trace_bounds").as_pandas_dataframe()
-            
             if not res.empty and pd.notna(res.iloc[0, 0]):
                 return [int(res.iloc[0, 0]), int(res.iloc[0, 1])]
                 
-            # [Fallback] 만약 trace_bounds가 비어있다면, slice 테이블에서 직접 추출
+            # 2. Fallback: slice 테이블에서 전체 범위 계산
             res = tp.query("SELECT MIN(ts), MAX(ts+dur) FROM slice").as_pandas_dataframe()
             if not res.empty and pd.notna(res.iloc[0, 0]):
                 return [int(res.iloc[0, 0]), int(res.iloc[0, 1])]
-                
         except Exception as e:
-            self.output_callback(f"⚠️ [Bounds Error] Failed to get global bounds: {str(e)}")
-            
+            self.output_callback(f"⚠️ [Bounds Error] {tp_type}: {str(e)}")
         return None
 
     def get_slice_bounds(self, tp_type, utid, name, scope_ts=None):
