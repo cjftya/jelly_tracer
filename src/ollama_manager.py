@@ -11,6 +11,9 @@ class OllamaManager:
     def __init__(self):
         self.__process = None 
         self.os_type = platform.system()
+        self.local_url = "127.0.0.1"
+        self.test_url = "192.168.45.116"
+        self.base_url = f"http://{self.test_url}:11434"
         
         self.__default_options = {
             "num_ctx": 24576,
@@ -24,10 +27,10 @@ class OllamaManager:
 
     def getL1Option(self):
         return {
-            "num_ctx": 24576,
-            "temperature": 0.2,
-            "top_p": 0.9,
-            "repeat_penalty": 1.2,
+            "num_ctx": 16384,
+            "temperature": 0.05,
+            "top_p": 0.8,
+            "repeat_penalty": 1.05,
             "num_predict": 4096,
             "mirostat": 0,
             "low_vram": True
@@ -45,7 +48,7 @@ class OllamaManager:
         }
 
     def get_installed_models(self):
-        client = Client(host="http://127.0.0.1:11434")
+        client = Client(host=self.base_url)
         response = client.list()
         return [model.model for model in response.models]
 
@@ -56,7 +59,7 @@ class OllamaManager:
         return self.__default_options.get("num_ctx", 0)
 
     def request(self, context, options=None, format=None, chunk_callback=None):
-        client = Client(host="http://127.0.0.1:11434")
+        client = Client(host=self.base_url)
         op = self.__default_options.copy()
         if options:
             op = options

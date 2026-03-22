@@ -9,21 +9,29 @@ class InsightScanner(BaseScanner):
         self.data_provider = None
         self.ai_analyst = None
 
-    def start(self, ollama_manager, output_callback):
-        super().start(ollama_manager, output_callback)
-        self.data_provider = InsightScanDataDelegate(output_callback)
-        self.ai_analyst = InsightScanAIDelegate(ollama_manager, output_callback)
+    def start(self, trace_normal, trace_slow, target_package, ollama_manager, analysis_data, output_callback):
+        super().start(trace_normal, trace_slow, target_package, ollama_manager, analysis_data, output_callback)
+        if self.data_provider is None:
+            self.data_provider = InsightScanDataDelegate(output_callback)
+            self.data_provider.init(trace_normal, trace_slow, target_package)
+        else:
+            self.data_provider.output_callback = output_callback
+            
+        if self.ai_analyst is None:
+            self.ai_analyst = InsightScanAIDelegate(ollama_manager, output_callback)
+        else:
+            self.ai_analyst.output_callback = output_callback
     
-    def run(self, trace_normal, trace_slow, target_package, analysis_data=None):
-        super().run(trace_normal, trace_slow, target_package, analysis_data)
-        
-        # 1. 공통 API 및 데이터 제공자 초기화
-        self.data_provider.init(trace_normal, trace_slow, target_package)
-        
-        self.output_callback(f"🚀 [Insight-Scan] Investigation Started: {target_package}")
+    def run(self, output_callback=None):  
+        if output_callback:
+            self.output_callback = output_callback
+            self.data_provider.output_callback = output_callback
+            self.ai_analyst.output_callback = output_callback
+
+        self.output_callback(f"🚀 [Insight-Scan] Investigation Started: {self.target_package}")
 
         # 2. L1 분석 데이터(Point-Scan 결과) 존재 확인
-        if not analysis_data:
+        if not self.analysis_data:
             self.output_callback("⚠️ [Error] No Point-Scan data found. Insight Scan requires L1 results.", True)
             return
 

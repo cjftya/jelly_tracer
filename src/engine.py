@@ -15,7 +15,7 @@ class Engine:
         if self.gui:
             self.gui.set_scan_checkbox_state(scan_type, checked, enabled)
 
-    def start(self, output_callback=None):
+    def start(self, output_callback=None, range_callback=None):
         self.output_callback = output_callback
         if self.ollamaManager is None:
             self.ollamaManager = OllamaManager()
@@ -23,7 +23,12 @@ class Engine:
         if self.server_manager is None:
             self.server_manager = TraceServerManager()
         #=====================
-        self.fusion_core_engine.start(self.ollamaManager, self.output_callback, self.update_scan_status)
+        self.fusion_core_engine.start(
+            self.ollamaManager, 
+            self.output_callback, 
+            self.update_scan_status,
+            range_callback=range_callback
+        )
 
     def stop(self):
         if self.ollamaManager:
@@ -33,10 +38,18 @@ class Engine:
         #=====================
         self.fusion_core_engine.stop()
 
-    def run(self, trace_normal, trace_slow, target_package, model_name=None, analysis_data_path=None):
+    def load(self, trace_normal, trace_slow, target_package, model_name=None, analysis_data_path=None):
         if model_name:
             self.ollamaManager.set_model_name(model_name)
+        
         self.server_manager.stop_servers()
         self.server_manager.start_servers(trace_normal, trace_slow)
-        #========================
-        self.fusion_core_engine.run(trace_normal, trace_slow, target_package, analysis_data_path=analysis_data_path)
+
+        self.fusion_core_engine.load(trace_normal, trace_slow, target_package, analysis_data_path)
+
+    def run(self, output_callback=None, start_m_index=0, end_m_index=0):
+        self.fusion_core_engine.run(
+            output_callback=output_callback,
+            start_m_index=start_m_index,
+            end_m_index=end_m_index
+        )

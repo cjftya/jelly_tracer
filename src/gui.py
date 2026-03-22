@@ -30,26 +30,20 @@ class ConsoleRedirector:
 class ExecutorThread(threading.Thread):
     def __init__(
         self,
-        normal_path: str,
-        slow_path: str,
-        target_package: str,
-        model_name: str = "gemma3-12b",
         engine: Engine = None,
         progress_callback=None,
         token_callback=None,
         finished_callback=None,
-        analysis_data_path: str = None,
+        start_m_index=0,
+        end_m_index=0,
     ):
         super().__init__(daemon=True)
-        self.normal_path = normal_path
-        self.slow_path = slow_path
-        self.target_package = target_package
-        self.model_name = model_name
         self.engine = engine
         self.progress_callback = progress_callback
         self.token_callback = token_callback
         self.finished_callback = finished_callback
-        self.analysis_data_path = analysis_data_path
+        self.start_m_index = start_m_index
+        self.end_m_index = end_m_index
         self.results: list[str] = []
         atexit.register(self.stop)
         self._stop_event = threading.Event()
@@ -75,13 +69,10 @@ class ExecutorThread(threading.Thread):
             except Exception:
                 self.token_total = 0
             
-            self.engine.start(output_callback=cb)
             self.engine.run(
-                self.normal_path,
-                self.slow_path,
-                self.target_package,
-                model_name=self.model_name,
-                analysis_data_path=self.analysis_data_path,
+                output_callback=cb,
+                start_m_index=self.start_m_index,
+                end_m_index=self.end_m_index
             )
         finally:
             pass
@@ -111,6 +102,7 @@ class TraceGui(ctk.CTk):
         self.thread: ExecutorThread | None = None
         self.engine = Engine(gui=self)
         self.console_font_size = 10
+        self.range_data = []
 
         # Configure Grid
         self.grid_columnconfigure(1, weight=1)
@@ -126,7 +118,10 @@ class TraceGui(ctk.CTk):
     def _initialize_executor(self):
         time.sleep(3)
 
-        self.engine.start()
+        self.engine.start(
+            output_callback=self._append_line,
+            range_callback=self.set_range_data
+        )
         
         # 설치된 모델 목록 가져와서 콤보박스 업데이트
         try:
@@ -192,6 +187,18 @@ class TraceGui(ctk.CTk):
         self.model_combo.set("model")
         self.model_combo.grid(row=3, column=0, padx=25, pady=(0, 10), sticky="ew")
 
+        # Load Data Button
+        self.btn_load_data = ctk.CTkButton(
+            self.sidebar_frame,
+            text="LOAD TRACE DATA",
+            command=self._on_load_data,
+            height=40,
+            fg_color="#1F538D",
+            hover_color="#2666AD",
+            font=ctk.CTkFont(size=12, weight="bold"),
+        )
+        self.btn_load_data.grid(row=4, column=0, padx=25, pady=(20, 10), sticky="ew")
+
         # Analysis Data
         self.analysis_label = ctk.CTkLabel(
             self.sidebar_frame,
@@ -200,10 +207,10 @@ class TraceGui(ctk.CTk):
             text_color="#555555",
             anchor="w",
         )
-        self.analysis_label.grid(row=4, column=0, padx=25, pady=(5, 0), sticky="ew")
+        self.analysis_label.grid(row=5, column=0, padx=25, pady=(5, 0), sticky="ew")
 
         self.analysis_frame = ctk.CTkFrame(self.sidebar_frame, fg_color="transparent")
-        self.analysis_frame.grid(row=5, column=0, padx=25, pady=(0, 10), sticky="ew")
+        self.analysis_frame.grid(row=6, column=0, padx=25, pady=(0, 10), sticky="ew")
         self.analysis_frame.grid_columnconfigure(0, weight=1)
 
         self.analysis_edit = ctk.CTkEntry(
@@ -225,6 +232,50 @@ class TraceGui(ctk.CTk):
         )
         self.btn_analysis.grid(row=1, column=0, sticky="ew")
 
+        # Range Selection
+        self.range_label = ctk.CTkLabel(
+            self.sidebar_frame,
+            text="SCAN RANGE",
+            font=ctk.CTkFont(size=10, weight="bold"),
+            text_color="#555555",
+            anchor="w",
+        )
+        self.range_label.grid(row=7, column=0, padx=25, pady=(15, 0), sticky="ew")
+
+        self.range_frame = ctk.CTkFrame(self.sidebar_frame, fg_color="transparent")
+        self.range_frame.grid(row=8, column=0, padx=25, pady=(5, 10), sticky="ew")
+        self.range_frame.grid_columnconfigure(0, weight=1)
+
+        self.start_slider = ctk.CTkSlider(
+            self.range_frame, from_=0, to=100, height=16,
+            command=self._on_range_change,
+            progress_color="#1F538D",
+            button_color="#1F538D",
+            button_hover_color="#2666AD",
+            state="disabled"
+        )
+        self.start_slider.set(0)
+        self.start_slider.grid(row=0, column=0, sticky="ew", pady=(5, 0))
+        self.start_val_label = ctk.CTkLabel(
+            self.range_frame, text="Start: -", font=ctk.CTkFont(size=10), text_color="#888888", anchor="w"
+        )
+        self.start_val_label.grid(row=1, column=0, sticky="ew", pady=(0, 5))
+
+        self.end_slider = ctk.CTkSlider(
+            self.range_frame, from_=0, to=100, height=16,
+            command=self._on_range_change,
+            progress_color="#1F538D",
+            button_color="#1F538D",
+            button_hover_color="#2666AD",
+            state="disabled"
+        )
+        self.end_slider.set(100)
+        self.end_slider.grid(row=2, column=0, sticky="ew", pady=(5, 0))
+        self.end_val_label = ctk.CTkLabel(
+            self.range_frame, text="End: -", font=ctk.CTkFont(size=10), text_color="#888888", anchor="w"
+        )
+        self.end_val_label.grid(row=3, column=0, sticky="ew")
+
         # Scan Operations checkboxes
         self.scan_opts_label = ctk.CTkLabel(
             self.sidebar_frame,
@@ -233,10 +284,10 @@ class TraceGui(ctk.CTk):
             text_color="#555555",
             anchor="w",
         )
-        self.scan_opts_label.grid(row=6, column=0, padx=25, pady=(15, 0), sticky="ew")
+        self.scan_opts_label.grid(row=9, column=0, padx=25, pady=(15, 0), sticky="ew")
 
         self.scan_opts_frame = ctk.CTkFrame(self.sidebar_frame, fg_color="transparent")
-        self.scan_opts_frame.grid(row=7, column=0, padx=25, pady=(5, 10), sticky="ew")
+        self.scan_opts_frame.grid(row=10, column=0, padx=25, pady=(5, 10), sticky="ew")
 
         self.point_scan_var = tk.BooleanVar(value=True)
         self.point_scan_cb = ctk.CTkCheckBox(
@@ -273,11 +324,11 @@ class TraceGui(ctk.CTk):
             text_color="#888888",
             anchor="w",
         )
-        self.path_label.grid(row=8, column=0, padx=25, pady=(20, 10), sticky="ew")
+        self.path_label.grid(row=11, column=0, padx=25, pady=(20, 10), sticky="ew")
 
         # Path Selection
         self.path_frame = ctk.CTkFrame(self.sidebar_frame, fg_color="transparent")
-        self.path_frame.grid(row=9, column=0, padx=25, pady=10, sticky="ew")
+        self.path_frame.grid(row=12, column=0, padx=25, pady=10, sticky="ew")
         self.path_frame.grid_columnconfigure(0, weight=1)
 
         self.normal_edit = ctk.CTkEntry(
@@ -349,6 +400,7 @@ class TraceGui(ctk.CTk):
             fg_color="#1F538D",
             hover_color="#2666AD",
             corner_radius=5,
+            state="disabled"
         )
         self.run_button.grid(row=0, column=1, sticky="e")
 
@@ -560,7 +612,41 @@ class TraceGui(ctk.CTk):
             else:
                 self.genesis_scan_var.set(True)
 
-    def _on_run(self):
+    def _on_range_change(self, value):
+        if not self.range_data:
+            return
+        
+        start_idx = int(self.start_slider.get())
+        end_idx = int(self.end_slider.get())
+        
+        # Ensure indices are within bounds
+        start_idx = max(0, min(start_idx, len(self.range_data) - 1))
+        end_idx = max(0, min(end_idx, len(self.range_data) - 1))
+        
+        self.start_val_label.configure(text=f"Start: {self.range_data[start_idx]}")
+        self.end_val_label.configure(text=f"End: {self.range_data[end_idx]}")
+
+    def set_range_data(self, data: list[str]):
+        """Updates the slider range and data points based on the provided list of strings."""
+        self.range_data = data
+        if not data:
+            self.start_slider.configure(from_=0, to=100, number_of_steps=100)
+            self.end_slider.configure(from_=0, to=100, number_of_steps=100)
+            self.start_val_label.configure(text="Start: -")
+            self.end_val_label.configure(text="End: -")
+            return
+            
+        max_idx = len(data) - 1
+        # Set number of steps to max_idx to ensure snaps to whole numbers (indices)
+        self.start_slider.configure(from_=0, to=max_idx, number_of_steps=max_idx if max_idx > 0 else 1)
+        self.end_slider.configure(from_=0, to=max_idx, number_of_steps=max_idx if max_idx > 0 else 1)
+        
+        self.start_slider.set(0)
+        self.end_slider.set(max_idx)
+        self._on_range_change(None)
+
+    def _on_load_data(self):
+        """Handle trace data loading and enable analysis controls."""
         normal = self.normal_edit.get().strip()
         slow = self.slow_edit.get().strip()
         target_pkg = self.package_edit.get().strip()
@@ -577,6 +663,29 @@ class TraceGui(ctk.CTk):
             messagebox.showwarning("Missing model", "Model name must be set.")
             return
 
+        # Call engine.load to initialize data and servers
+        try:
+            self.engine.load(normal, slow, target_pkg, model, analysis_data)
+        except Exception as e:
+            messagebox.showerror("Load Error", f"Failed to load trace data: {e}")
+            return
+
+        # Enable controls
+        self.run_button.configure(state="normal")
+        self.start_slider.configure(state="normal")
+        self.end_slider.configure(state="normal")
+        
+        # Enable scan option checkboxes
+        self.point_scan_cb.configure(state="normal")
+        self.insight_scan_cb.configure(state="normal")
+        self.genesis_scan_cb.configure(state="normal")
+        
+        # Feedback
+        messagebox.showinfo("Load Data", "Trace data loaded successfully. Analysis tools are now enabled.")
+        self.status_label.configure(text="Data Loaded - Ready")
+        print("System: Trace data loaded. Analysis ready.")
+
+    def _on_run(self):
         self.status_label.configure(text="Analyzing...")
         self.run_button.configure(state="disabled")
         self.text_edit.configure(state="normal")
@@ -588,15 +697,12 @@ class TraceGui(ctk.CTk):
         self.realtime_status.configure(text="")  # Clear status on new run
 
         self.thread = ExecutorThread(
-            normal,
-            slow,
-            target_pkg,
-            model,
             engine=self.engine,
             progress_callback=self._append_line,
             token_callback=self._update_token_usage,
             finished_callback=self._on_finished,
-            analysis_data_path=analysis_data,
+            start_m_index=int(self.start_slider.get()),
+            end_m_index=int(self.end_slider.get()),
         )
         self.thread.start()
 
