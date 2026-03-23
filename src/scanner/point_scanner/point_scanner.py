@@ -8,8 +8,6 @@ from scanner.base_scanner import BaseScanner
 class PointScanner(BaseScanner):
     def __init__(self):
         super().__init__()
-        self.target_package = None
-        
         # 각 분야의 전문가(Delegates) 소집
         self.data_provider = None  # SQL 기반 데이터 추출 엔진
         self.ai_analyst = None     # LLM 기반 추론 분석 전문가
@@ -24,12 +22,10 @@ class PointScanner(BaseScanner):
         self.milestone_start_index = 0
         self.milestone_end_index = 0
 
-    def start(self, trace_normal, trace_slow, target_package, ollama_manager, analysis_data, output_callback):
-        """수사 시작 전 전문가 객체들을 초기화합니다."""
-        super().start(trace_normal, trace_slow, target_package, ollama_manager, analysis_data, output_callback)
-        self.target_package = target_package
+    def start(self, common_api, target_package, ollama_manager, output_callback):
+        super().start(common_api, target_package, ollama_manager, output_callback)
         self.data_provider = PointScanDataDelegate(output_callback)
-        self.data_provider.init(trace_normal, trace_slow, target_package)
+        self.data_provider.init(common_api, target_package)
         self.ai_analyst = PointScanAIDelegate(ollama_manager, output_callback)
 
         self.milestones = self.data_provider.get_common_milestones()
@@ -111,3 +107,72 @@ class PointScanner(BaseScanner):
             
         self.output_callback("=" * 60)
         self.output_callback("\n✅ [Point-Scan] Investigation concluded successfully.")
+
+        return self.collect_analyze_data(analysis_result, json_report_data)
+
+    def collect_analyze_data(self, ai_result, raw_json_data):
+        # 1. 마일스톤 좌표 확보
+        start_node = self.milestones[self.milestone_start_index]
+        end_node = self.milestones[self.milestone_end_index]
+
+        # 2. AI 리포트에서 단일 타겟 파싱 (Regex)
+        pattern = re.compile(
+            r"- Case:\s*(?P<case_id>\S+)\n"
+            r"- Target-Id:\s*(?P<target_id>\d+)\n"
+            r"- Duration:\s*(?P<duration>[\d.]+)ms"
+        )
+        
+        match = pattern.search(ai_result)
+        if not match:
+            self.output_callback("🚨 [Critical] Failed to parse target from AI report.", True)
+            return None
+
+        data = match.groupdict()
+        target_info = {
+            "case_id": data["case_id"],
+            "target_id": int(data["target_id"]),
+            "duration_ms": float(data["duration"])
+        }
+
+        # 3. [재귀 탐색] Raw JSON 트리에서 물리 좌표(__internal_*) 추출
+        def find_internal_coords(node, target_id):
+            if node.get("target_id") == target_id:
+                return {
+                    "start_ts_ns": node.get("__internal_ts"),
+                    "duration_ns": node.get("__internal_dur"),
+                    "utid": node.get("__internal_utid")
+                }
+            
+            for child in node.get("children", []):
+                found = find_internal_coords(child, target_id)
+                if found: return found
+            return None
+
+        internal_data = {}
+        if raw_json_data.get("worst_cases"):
+            # 워스트 케이스가 하나이므로 index 0의 트리만 훑음
+            root_tree = raw_json_data["worst_cases"][0].get("tree", {})
+            internal_data = find_internal_coords(root_tree, target_info["target_id"]) or {}
+
+        # 4. 데이터 통합 및 좌표 검증
+        if not internal_data.get("start_ts_ns"):
+            self.output_callback(f"⚠️ [Warning] System coordinates not found for ID: {target_info['target_id']}", True)
+            # 좌표를 못 찾으면 마일스톤 시작점을 기본값으로 사용 (Fallback)
+            internal_data = {"start_ts_ns": start_node['ts_s'], "duration_ns": 0, "utid": internal_data.get("utid")}
+
+        target_info.update(internal_data)
+
+        # 5. 최종 마스터 데이터 조립
+        master_data = {
+            "milestones": {
+                "start_name": start_node['name'],
+                "end_name": end_node['name'],
+                "start_ts_ns": start_node['ts_s'], 
+                "end_ts_ns": end_node['ts_s']
+            },
+            "target_data": target_info,
+            "report_data": ai_result,
+            "ai_thought": getattr(self.ai_analyst, 'thought_archive', "")
+        }
+
+        return master_data

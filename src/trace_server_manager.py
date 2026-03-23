@@ -44,4 +44,18 @@ class TraceServerManager:
             print(f"🚿 Trace 세션 정리중... {len(self.procs)}개")
             for proc in self.procs:
                 proc.terminate()
+            
+            if self.os_type == "Windows":
+                subprocess.run(
+                    ["taskkill", "/F", "/IM", "trace_processor_shell.exe", "/T"], 
+                    capture_output=True, 
+                    text=True
+                )
+            else:
+                subprocess.run(
+                    ["pkill", "-f", "trace_processor"],
+                    capture_output=True,
+                    text=True
+                )
+            
             print("✅ 완료")

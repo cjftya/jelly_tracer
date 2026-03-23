@@ -12,7 +12,7 @@ class OllamaManager:
         self.__process = None 
         self.os_type = platform.system()
         self.local_url = "127.0.0.1"
-        self.test_url = "192.168.45.116"
+        self.test_url = "192.168.45.211"
         self.base_url = f"http://{self.test_url}:11434"
         
         self.__default_options = {
@@ -28,7 +28,7 @@ class OllamaManager:
     def getL1Option(self):
         return {
             "num_ctx": 16384,
-            "temperature": 0.05,
+            "temperature": 0.1,
             "top_p": 0.8,
             "repeat_penalty": 1.05,
             "num_predict": 4096,
@@ -36,16 +36,28 @@ class OllamaManager:
             "low_vram": True
         }
 
-    def getL2Option(self, temperature=0.0):
+    def getL2Phase1Option(self):
         return {
-            "num_ctx": 24576,
-            "temperature": temperature,
-            "top_p": 0.9,
-            "repeat_penalty": 1.2,
+            "num_ctx": 16384,
+            "temperature": 0.1,
+            "top_p": 0.7,
+            "repeat_penalty": 1.1,
             "num_predict": 2048,
             "mirostat": 0,
             "low_vram": True
         }
+
+    def getL2Phase2Option(self):
+        return {
+            "num_ctx": 16384,
+            "temperature": 0.1,
+            "top_p": 0.8,
+            "repeat_penalty": 1.2,
+            "num_predict": 4096,
+            "mirostat": 0,
+            "low_vram": True
+        }
+
 
     def get_installed_models(self):
         client = Client(host=self.base_url)
@@ -56,7 +68,7 @@ class OllamaManager:
         self.__model_name = model_name
 
     def get_context_size(self):
-        return self.__default_options.get("num_ctx", 0)
+        return self.getL1Option().get("num_ctx", 0)
 
     def request(self, context, options=None, format=None, chunk_callback=None):
         client = Client(host=self.base_url)
@@ -94,7 +106,7 @@ class OllamaManager:
         print("🚀 LLM 분석 환경 설정중...")
         forensic_env = os.environ.copy()
         forensic_env["OLLAMA_FLASH_ATTENTION"] = "1"
-        forensic_env["OLLAMA_KV_CACHE_TYPE"] = "q4_0"
+        forensic_env["OLLAMA_KV_CACHE_TYPE"] = "q8_0"
         forensic_env["OLLAMA_NUM_PARALLEL"] = "1"
 
         self.__process = subprocess.Popen(
@@ -115,7 +127,7 @@ class OllamaManager:
         
         if self.os_type == "Windows":
             subprocess.run(
-                ["taskkill", "/F", "/IM", "ollama.exe"], 
+                ["taskkill", "/F", "/IM", "ollama.exe", "/T"], 
                 capture_output=True, 
                 text=True
             )

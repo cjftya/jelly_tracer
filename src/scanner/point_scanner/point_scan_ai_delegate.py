@@ -12,8 +12,6 @@ class PointScanAIDelegate:
         self.thought_archive = [] # AI의 깊은 생각 과정을 저장
 
     def request_analysis(self, context_dict):
-        """새로운 프롬프트 규격에 맞춰 AI에게 분석을 요청합니다."""
-        
         # 1. 입력 컨텍스트 구성
         context_text = (
 f"[Investigation Context]\n"
@@ -48,7 +46,7 @@ f"Based on the data above, execute the defined 'Analysis Logic' and select the s
             split_pos = raw_result.find(anchor)
             thought_part = raw_result[:split_pos]
             final_report = raw_result[split_pos:].strip()
-            
+
             # 생각 부분에서 태그 제거 후 저장
             clean_thought = re.sub(r'</?think>', '', thought_part).strip()
             if clean_thought:

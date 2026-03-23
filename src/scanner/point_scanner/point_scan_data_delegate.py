@@ -14,9 +14,9 @@ class PointScanDataDelegate:
         self.output_callback = output_callback
         pd.set_option('future.no_silent_downcasting', True)
 
-    def init(self, trace_normal, trace_slow, target_package):
+    def init(self, common_api, target_package):
         """두 트레이스 파일을 로드하고 분석을 위한 기초 시간 범위를 설정합니다."""
-        self._common_api = CommonAPI(trace_normal, trace_slow, target_package)
+        self._common_api = common_api
         
         # 전체 트레이스의 시작과 끝을 구해야 나중에 스레드 점수를 매길 때 범위를 한정할 수 있습니다.
         self.ts_n = self.get_global_bounds("normal")
@@ -28,20 +28,17 @@ class PointScanDataDelegate:
     def get_common_milestones(self):
         core_candidates = ['bindApplication', 'activityStart', 'activityResume']
         def fetch_milestones(mode):
-            # [수정] API 구조에 따라 안전하게 tp와 upid를 가져옵니다.
             try:
-                # 메서드 형태인 경우
                 tp = self._common_api.get_trace_processor(mode)
                 upid = self._common_api.get_upid(mode)
             except AttributeError:
-                # 속성 형태인 경우 (주신 코드 기준)
                 tp = self._common_api.tp_n if mode == "normal" else self._common_api.tp_s
                 upid = self._common_api.upid_n if mode == "normal" else self._common_api.upid_s
             
             if tp is None or upid is None:
                 return {}
 
-            # 2. 코어 마일스톤 추출 (프로세스 내 모든 스레드 대상)
+            # 코어 마일스톤 추출 (프로세스 내 모든 스레드 대상)
             query = f"""
                 SELECT name, ts 
                 FROM slice 
@@ -56,7 +53,7 @@ class PointScanDataDelegate:
             # 이름 중복 시 가장 먼저 나타난(가장 빠른) ts 선택
             m_dict = {row['name']: row['ts'] for _, row in df.drop_duplicates('name').iterrows()}
             
-            # 3. '화면 변화 없음' 지점 찾기 (Visual Idle)
+            # '화면 변화 없음' 지점 찾기 (Visual Idle)
             base_ts = m_dict.get('activityResume', 0)
             idle_query = f"""
                 SELECT MAX(ts + dur) as last_ts
@@ -153,10 +150,6 @@ class PointScanDataDelegate:
         return final_milestones
 
     def identify_targets(self):
-        """
-        수사 대상이 될 메인 스레드를 식별합니다. 
-        이름 매칭뿐만 아니라 실행 점수(Total Score)를 계산하여 가장 의심스러운 놈을 잡습니다.
-        """
         self.output_callback("🔍 [Targeting] Identifying primary investigation targets...", True)
         
         # Slow 트레이스에서 가장 활발하거나 중요한(Choreographer 등) 스레드 후보 추출
@@ -202,16 +195,12 @@ class PointScanDataDelegate:
         return self.utid_n, self.utid_s, self.target_thread
 
     def generate_point_scan_json(self, start_m, end_m):
-        """
-        핵심 엔진: 3개의 최악 사례(Worst Cases)를 추출하여 JSON 트리로 변환합니다.
-        R1 모델이 이 데이터를 읽고 범인을 지목하게 됩니다.
-        """
         if not self.utid_s or not self.utid_n:
             return {"error": "Target threads not identified."}
 
         self.output_callback("🚀 [JSON Engine] Starting high-precision data condensation and tree generation...", True)
 
-        # 1. 지연이 가장 심한 3개의 핵심 슬라이스(Root)를 찾습니다.
+        # 1. 지연이 가장 심한 2개의 핵심 슬라이스(Root)를 찾습니다.
         if not self.ts_s:
             return {"error": "Trace bounds not available."}
 
@@ -275,7 +264,7 @@ class PointScanDataDelegate:
             "wait_time": round(s_metrics['wait'], 1),
             "impact_ratio": impact_ratio,
             "children": [],
-            "__internal_id": int(slice_id),
+            "target_id": int(slice_id),
             "__internal_ts": s_metrics['raw_ts'],
             "__internal_dur": s_metrics['raw_dur'],
             "__internal_utid": int(self.utid_s)
@@ -328,8 +317,7 @@ class PointScanDataDelegate:
                     })
         return node_data
 
-    def _find_worst_slices(self, utid_n, utid_s, start_ts_n, end_ts_n, start_ts_s, end_ts_s, limit=3):
-        """전체 트레이스에서 지연 임팩트가 가장 큰 3개의 '단일 최악 인스턴스'를 찾습니다."""
+    def _find_worst_slices(self, utid_n, utid_s, start_ts_n, end_ts_n, start_ts_s, end_ts_s, limit=2):
         self.output_callback("🛰️ [Initial Scan] Searching for the single worst instances of regressions...", True)
         
         # 1. Slow 트레이스 쿼리에 시간 범위(ts) 필터 추가
@@ -460,7 +448,7 @@ class PointScanDataDelegate:
             'raw_dur': s_dur
         }
 
-    def _get_node_metrics_by_name(self, tp, utid, name, start_ts=None, end_ts=None): # [수정] 인자 추가
+    def _get_node_metrics_by_name(self, tp, utid, name, start_ts=None, end_ts=None):
         """이름을 기준으로 해당 스레드에서 가장 길게 실행된 Baseline 데이터를 가져옵니다."""
         clean_name = name.replace("'", "''")
         query = f"""
@@ -472,7 +460,7 @@ class PointScanDataDelegate:
         """
         res = tp.query(query).as_pandas_dataframe()
         if res.empty: return None
-        # [수정] id 기반 함수를 호출할 때 구간 정보를 그대로 전달합니다.
+        # id 기반 함수를 호출할 때 구간 정보를 그대로 전달합니다.
         return self._get_node_metrics_by_id(tp, utid, res.iloc[0]['id'], start_ts=start_ts, end_ts=end_ts)
 
     def _get_structural_children(self, tp, parent_id):
@@ -523,13 +511,12 @@ class PointScanDataDelegate:
     def _abort_investigation(self, reason, detail):
         self.output_callback(f"\n❌ [ANALYSIS ABORTED] {reason}\n   - {detail}", True)
 
-    def get_clean_json_for_ai(self, data):  # 1. 여기에 self 추가
+    def get_clean_json_for_ai(self, data):
         if isinstance(data, list):
-            # 2. 재귀 호출 시에도 self. 을 붙여줘야 합니다.
             return [self.get_clean_json_for_ai(item) for item in data]
         elif isinstance(data, dict):
             return {
-                k: self.get_clean_json_for_ai(v)  # 3. 여기도 self. 추가
+                k: self.get_clean_json_for_ai(v)
                 for k, v in data.items() 
                 if not k.startswith("__internal")
             }

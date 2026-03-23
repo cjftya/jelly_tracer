@@ -53,10 +53,17 @@ class ExecutorThread(threading.Thread):
         self.token_total = 0
 
         def cb(msg: str, system: bool=False):
-            if msg.startswith("\\token"):
-                self.token_used += int(msg.replace("\\token", "").strip())
+            if msg.startswith("\\token_zero"):
+                self.token_used = 0
                 if self.token_callback:
                     self.token_callback(self.token_used, self.token_total)
+            elif msg.startswith("\\token"):
+                try:
+                    self.token_used += int(msg.replace("\\token", "").strip())
+                    if self.token_callback:
+                        self.token_callback(self.token_used, self.token_total)
+                except ValueError:
+                    pass
             else:
                 self.results.append(msg)
                 if self.progress_callback:
@@ -112,7 +119,7 @@ class TraceGui(ctk.CTk):
 
         # 프로그램 시작 시 AI 엔진 및 리소스 매니저 초기화 (딱 한 번)
         if self.status_label:
-            self.status_label.configure(text="Initializing System...")
+            self.status_label.configure(text="⚙️ Initializing System...")
         threading.Thread(target=self._initialize_executor, daemon=True).start()
 
     def _initialize_executor(self):
@@ -135,7 +142,7 @@ class TraceGui(ctk.CTk):
         except Exception as e:
             print(f"⚠️ 모델 목록 업데이트 실패: {e}")
 
-        self.after(0, lambda: self.status_label.configure(text="System Ready"))
+        self.after(0, lambda: self.status_label.configure(text="✅ System Ready"))
 
     def _build_ui(self):
         # --- Sidebar ---
@@ -152,7 +159,7 @@ class TraceGui(ctk.CTk):
             self.sidebar_frame,
             text="CONFIGURATION",
             font=ctk.CTkFont(size=12, weight="bold"),
-            text_color="#888888",
+            text_color="#D0D0D0",
             anchor="w",
         )
         self.settings_label.grid(row=0, column=0, padx=25, pady=(40, 10), sticky="ew")
@@ -170,8 +177,8 @@ class TraceGui(ctk.CTk):
         self.model_label = ctk.CTkLabel(
             self.sidebar_frame,
             text="AI Model",
-            font=ctk.CTkFont(size=10, weight="bold"),
-            text_color="#555555",
+            font=ctk.CTkFont(size=11, weight="bold"),
+            text_color="#D0D0D0",
             anchor="w",
         )
         self.model_label.grid(row=2, column=0, padx=25, pady=(5, 0), sticky="ew")
@@ -199,45 +206,12 @@ class TraceGui(ctk.CTk):
         )
         self.btn_load_data.grid(row=4, column=0, padx=25, pady=(20, 10), sticky="ew")
 
-        # Analysis Data
-        self.analysis_label = ctk.CTkLabel(
-            self.sidebar_frame,
-            text="Analysis Data",
-            font=ctk.CTkFont(size=10, weight="bold"),
-            text_color="#555555",
-            anchor="w",
-        )
-        self.analysis_label.grid(row=5, column=0, padx=25, pady=(5, 0), sticky="ew")
-
-        self.analysis_frame = ctk.CTkFrame(self.sidebar_frame, fg_color="transparent")
-        self.analysis_frame.grid(row=6, column=0, padx=25, pady=(0, 10), sticky="ew")
-        self.analysis_frame.grid_columnconfigure(0, weight=1)
-
-        self.analysis_edit = ctk.CTkEntry(
-            self.analysis_frame,
-            placeholder_text="Select JSON analysis data",
-            height=35,
-            fg_color="#242424",
-        )
-        self.analysis_edit.grid(row=0, column=0, sticky="ew", pady=(0, 5))
-
-        self.btn_analysis = ctk.CTkButton(
-            self.analysis_frame,
-            text="Browse JSON",
-            command=self._choose_json_data,
-            height=32,
-            fg_color="#333333",
-            hover_color="#444444",
-            text_color="#AAAAAA",
-        )
-        self.btn_analysis.grid(row=1, column=0, sticky="ew")
-
         # Range Selection
         self.range_label = ctk.CTkLabel(
             self.sidebar_frame,
             text="SCAN RANGE",
-            font=ctk.CTkFont(size=10, weight="bold"),
-            text_color="#555555",
+            font=ctk.CTkFont(size=11, weight="bold"),
+            text_color="#D0D0D0",
             anchor="w",
         )
         self.range_label.grid(row=7, column=0, padx=25, pady=(15, 0), sticky="ew")
@@ -257,7 +231,7 @@ class TraceGui(ctk.CTk):
         self.start_slider.set(0)
         self.start_slider.grid(row=0, column=0, sticky="ew", pady=(5, 0))
         self.start_val_label = ctk.CTkLabel(
-            self.range_frame, text="Start: -", font=ctk.CTkFont(size=10), text_color="#888888", anchor="w"
+            self.range_frame, text="Start: -", font=ctk.CTkFont(size=11), text_color="#CCCCCC", anchor="w"
         )
         self.start_val_label.grid(row=1, column=0, sticky="ew", pady=(0, 5))
 
@@ -272,56 +246,16 @@ class TraceGui(ctk.CTk):
         self.end_slider.set(100)
         self.end_slider.grid(row=2, column=0, sticky="ew", pady=(5, 0))
         self.end_val_label = ctk.CTkLabel(
-            self.range_frame, text="End: -", font=ctk.CTkFont(size=10), text_color="#888888", anchor="w"
+            self.range_frame, text="End: -", font=ctk.CTkFont(size=11), text_color="#CCCCCC", anchor="w"
         )
         self.end_val_label.grid(row=3, column=0, sticky="ew")
-
-        # Scan Operations checkboxes
-        self.scan_opts_label = ctk.CTkLabel(
-            self.sidebar_frame,
-            text="SCAN OPS",
-            font=ctk.CTkFont(size=10, weight="bold"),
-            text_color="#555555",
-            anchor="w",
-        )
-        self.scan_opts_label.grid(row=9, column=0, padx=25, pady=(15, 0), sticky="ew")
-
-        self.scan_opts_frame = ctk.CTkFrame(self.sidebar_frame, fg_color="transparent")
-        self.scan_opts_frame.grid(row=10, column=0, padx=25, pady=(5, 10), sticky="ew")
-
-        self.point_scan_var = tk.BooleanVar(value=True)
-        self.point_scan_cb = ctk.CTkCheckBox(
-            self.scan_opts_frame, text="point scan", variable=self.point_scan_var,
-            font=ctk.CTkFont(size=12), border_width=2,
-            command=lambda: self._on_scan_mode_select("point"),
-            state="disabled"
-        )
-        self.point_scan_cb.pack(anchor="w", pady=2)
-
-        self.insight_scan_var = tk.BooleanVar(value=False)
-        self.insight_scan_cb = ctk.CTkCheckBox(
-            self.scan_opts_frame, text="insight scan", variable=self.insight_scan_var,
-            font=ctk.CTkFont(size=12), border_width=2,
-            command=lambda: self._on_scan_mode_select("insight"),
-            state="disabled"
-        )
-        self.insight_scan_cb.pack(anchor="w", pady=2)
-
-        self.genesis_scan_var = tk.BooleanVar(value=False)
-        self.genesis_scan_cb = ctk.CTkCheckBox(
-            self.scan_opts_frame, text="genesis scan", variable=self.genesis_scan_var,
-            font=ctk.CTkFont(size=12), border_width=2,
-            command=lambda: self._on_scan_mode_select("genesis"),
-            state="disabled"
-        )
-        self.genesis_scan_cb.pack(anchor="w", pady=2)
 
         # Separator-like padding
         self.path_label = ctk.CTkLabel(
             self.sidebar_frame,
             text="RESOURCES",
             font=ctk.CTkFont(size=12, weight="bold"),
-            text_color="#888888",
+            text_color="#D0D0D0",
             anchor="w",
         )
         self.path_label.grid(row=11, column=0, padx=25, pady=(20, 10), sticky="ew")
@@ -385,7 +319,7 @@ class TraceGui(ctk.CTk):
 
         self.status_label = ctk.CTkLabel(
             self.header_frame,
-            text="System Standby",
+            text="💤 System Standby",
             font=ctk.CTkFont(size=24, weight="bold"),
         )
         self.status_label.grid(row=0, column=0, sticky="w")
@@ -436,8 +370,8 @@ class TraceGui(ctk.CTk):
         self.realtime_status = ctk.CTkLabel(
             self.main_container,
             text="",
-            font=ctk.CTkFont(family="Consolas", size=12),
-            text_color="#888888",
+            font=ctk.CTkFont(family="Consolas", size=14, weight="bold"),
+            text_color="#569CD6",
             anchor="w",
             height=25,
         )
@@ -473,8 +407,8 @@ class TraceGui(ctk.CTk):
         self.left_header = ctk.CTkLabel(
             self.left_pane,
             text=" AI INVESTIGATOR",
-            font=ctk.CTkFont(size=10, weight="bold"),
-            text_color="#555555",
+            font=ctk.CTkFont(size=11, weight="bold"),
+            text_color="#D0D0D0",
             anchor="w",
             height=20,
         )
@@ -482,7 +416,7 @@ class TraceGui(ctk.CTk):
 
         self.text_edit = ctk.CTkTextbox(
             self.left_pane,
-            font=("Consolas", self.console_font_size),
+            font=("Segoe UI", self.console_font_size),
             fg_color="#0F0F0F",
             text_color="#CCCCCC",
             border_width=1,
@@ -503,8 +437,8 @@ class TraceGui(ctk.CTk):
         self.right_header = ctk.CTkLabel(
             self.right_pane,
             text=" SYSTEM LOG",
-            font=ctk.CTkFont(size=10, weight="bold"),
-            text_color="#555555",
+            font=ctk.CTkFont(size=11, weight="bold"),
+            text_color="#D0D0D0",
             anchor="w",
             height=20,
         )
@@ -512,7 +446,7 @@ class TraceGui(ctk.CTk):
 
         self.system_edit = ctk.CTkTextbox(
             self.right_pane,
-            font=("Consolas", self.console_font_size),
+            font=("Segoe UI", self.console_font_size),
             fg_color="#0F0F0F",
             text_color="#CCCCCC",
             border_width=1,
@@ -544,7 +478,7 @@ class TraceGui(ctk.CTk):
             self.console_font_size = max(self.console_font_size - 1, 6)
 
         # Apply to both
-        new_font = ("Consolas", self.console_font_size)
+        new_font = ("Segoe UI", self.console_font_size)
         self.text_edit.configure(font=new_font)
         self.system_edit.configure(font=new_font)
         return "break"  # Prevents default scrolling behavior if Ctrl is held
@@ -563,54 +497,6 @@ class TraceGui(ctk.CTk):
         if path:
             entry_widget.delete(0, "end")
             entry_widget.insert(0, path)
-
-    def _choose_json_data(self):
-        path = filedialog.askopenfilename(
-            title="Select Analysis Data (JSON)",
-            filetypes=[("JSON files", "*.json")]
-        )
-        if path:
-            self.analysis_edit.delete(0, "end")
-            self.analysis_edit.insert(0, path)
-
-    def set_scan_checkbox_state(self, scan_type, checked=None, enabled=None):
-        """
-        scan_type: 'point', 'insight', 'genesis'
-        """
-        mapping = {
-            'point': (self.point_scan_cb, self.point_scan_var),
-            'insight': (self.insight_scan_cb, self.insight_scan_var),
-            'genesis': (self.genesis_scan_cb, self.genesis_scan_var)
-        }
-        if scan_type in mapping:
-            cb, var = mapping[scan_type]
-            if checked is not None:
-                var.set(checked)
-                if checked: # If we're checking one externally, uncheck others
-                    self._on_scan_mode_select(scan_type)
-            if enabled is not None:
-                cb.configure(state="normal" if enabled else "disabled")
-
-    def _on_scan_mode_select(self, active_mode):
-        """Implement radio-button like behavior for scan checkboxes."""
-        if active_mode == "point":
-            if self.point_scan_var.get():
-                self.insight_scan_var.set(False)
-                self.genesis_scan_var.set(False)
-            else:
-                self.point_scan_var.set(True) # Keep at least one checked
-        elif active_mode == "insight":
-            if self.insight_scan_var.get():
-                self.point_scan_var.set(False)
-                self.genesis_scan_var.set(False)
-            else:
-                self.insight_scan_var.set(True)
-        elif active_mode == "genesis":
-            if self.genesis_scan_var.get():
-                self.point_scan_var.set(False)
-                self.insight_scan_var.set(False)
-            else:
-                self.genesis_scan_var.set(True)
 
     def _on_range_change(self, value):
         if not self.range_data:
@@ -646,12 +532,11 @@ class TraceGui(ctk.CTk):
         self._on_range_change(None)
 
     def _on_load_data(self):
-        """Handle trace data loading and enable analysis controls."""
+        """Handle trace data loading in a background thread and enable analysis controls."""
         normal = self.normal_edit.get().strip()
         slow = self.slow_edit.get().strip()
         target_pkg = self.package_edit.get().strip()
         model = self.model_combo.get().strip()
-        analysis_data = self.analysis_edit.get().strip()
 
         if not normal or not slow:
             messagebox.showwarning("Missing paths", "Both trace paths must be set.")
@@ -663,31 +548,57 @@ class TraceGui(ctk.CTk):
             messagebox.showwarning("Missing model", "Model name must be set.")
             return
 
-        # Call engine.load to initialize data and servers
-        try:
-            self.engine.load(normal, slow, target_pkg, model, analysis_data)
-        except Exception as e:
-            messagebox.showerror("Load Error", f"Failed to load trace data: {e}")
-            return
+        # Disable button and show loading status
+        self.btn_load_data.configure(state="disabled")
+        self.status_label.configure(text="⏳ Loading Data...")
+        print("System: Loading trace data. Please wait...")
 
-        # Enable controls
+        def load_task():
+            try:
+                # Call engine.load to initialize data and servers
+                self.engine.load(normal, slow, target_pkg, model)
+                
+                # Update GUI on the main thread after successful load
+                self.after(0, self._on_load_success)
+            except Exception as e:
+                # Update GUI on the main thread after error
+                self.after(0, lambda: self._on_load_error(e))
+
+        threading.Thread(target=load_task, daemon=True).start()
+
+    def _on_load_success(self):
+        """Callback for successful data loading."""
+        self.btn_load_data.configure(state="normal")
         self.run_button.configure(state="normal")
         self.start_slider.configure(state="normal")
         self.end_slider.configure(state="normal")
         
-        # Enable scan option checkboxes
-        self.point_scan_cb.configure(state="normal")
-        self.insight_scan_cb.configure(state="normal")
-        self.genesis_scan_cb.configure(state="normal")
-        
-        # Feedback
+        self.status_label.configure(text="📦 Data Loaded - Ready")
         messagebox.showinfo("Load Data", "Trace data loaded successfully. Analysis tools are now enabled.")
-        self.status_label.configure(text="Data Loaded - Ready")
         print("System: Trace data loaded. Analysis ready.")
 
+    def _on_load_error(self, error):
+        """Callback for failed data loading."""
+        self.btn_load_data.configure(state="normal")
+        self.status_label.configure(text="⚠️ System Standby")
+        messagebox.showerror("Load Error", f"Failed to load trace data: {error}")
+        print(f"System Error: Failed to load data - {error}")
+
     def _on_run(self):
-        self.status_label.configure(text="Analyzing...")
+        self.status_label.configure(text="🧠 Analyzing...")
+        
+        # Disable all UI controls in sidebar and header
         self.run_button.configure(state="disabled")
+        self.btn_load_data.configure(state="disabled")
+        self.package_edit.configure(state="disabled")
+        self.model_combo.configure(state="disabled")
+        self.start_slider.configure(state="disabled")
+        self.end_slider.configure(state="disabled")
+        self.normal_edit.configure(state="disabled")
+        self.btn_n.configure(state="disabled")
+        self.slow_edit.configure(state="disabled")
+        self.btn_s.configure(state="disabled")
+
         self.text_edit.configure(state="normal")
         self.text_edit.delete("1.0", "end")
         self.text_edit.configure(state="disabled")
@@ -743,7 +654,7 @@ class TraceGui(ctk.CTk):
         self.after(
             0,
             lambda: [
-                self.status_label.configure(text="Analysis Complete"),
+                self.status_label.configure(text="🏁 Analysis Complete"),
                 messagebox.showinfo("Done", "Execution finished. The application must be restarted for a new run."),
             ],
         )

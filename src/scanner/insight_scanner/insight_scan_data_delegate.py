@@ -1,6 +1,4 @@
 import pandas as pd
-import numpy as np
-from common_api import CommonAPI
 
 class InsightScanDataDelegate:
     def __init__(self, output_callback):
@@ -8,104 +6,80 @@ class InsightScanDataDelegate:
         self.output_callback = output_callback
         self.package = None
 
-    def init(self, trace_normal, trace_slow, target_package):
-        # CommonAPI를 통해 타겟 패키지의 UPID 확보
-        self._common_api = CommonAPI(trace_normal, trace_slow, target_package)
+    def init(self, common_api, target_package):
+        self._common_api = common_api
         self.package = target_package
 
-    def fetch_deep_dive_package(self, window):
-        # 분석 구간 및 50ms 마진 설정
-        start_ns = window['start']
-        end_ns = window['end']
-        margin_ns = int(window.get('margin', 50.0) * 1e6)
-        context_start_ns = start_ns - margin_ns
-        
-        upid = self._common_api.upid_s
-        self.output_callback(f"🧬 [Data-Drilling] Extraction with Hard Caps (Optimized for DeepSeek-R1)...", True)
+    def fetch_deep_dive_package(self, collected_data):
+        target = collected_data.get("target_data", {})
+        try:
+            target_id = int(target.get("target_id", 0))
+            start_ns = int(target.get("start_ts_ns", 0))
+            duration_ns = int(target.get("duration_ns", 0))
+            utid = int(target.get("utid", 0))
+        except (ValueError, TypeError):
+            self.output_callback("🚨 [Error] Invalid numeric data in master_data.", True)
+            return None
 
-        # 각 API의 결과를 가져온 후, AI의 컨텍스트 보호를 위해 Hard Cap 적용
+        end_ns = start_ns + duration_ns
+        self.output_callback(f"🧬 [Deep-Scan] Extracting Core Evidence (Target ID: {target_id}, UTID: {utid})", True)
+
+        tp_s = self._common_api.tp_s
+        if tp_s is None:
+            self.output_callback("🚨 [Error] Trace Processor is not initialized.", True)
+            return None
+
         return {
-            # 1. v_stack: 상위 25개 (함수 호출 계층 및 주요 지연 파악용)
-            "v_stack": self._get_vertical_stack(upid, start_ns, end_ns, context_start_ns)[:25],
-            
-            # 2. locks: 상위 10개 (가장 지배적인 병목 락 식별용)
-            "locks": self._get_lock_contention(start_ns, end_ns, context_start_ns)[:10],
-            
-            # 3. neighbors: 상위 5개 (SQL에서 이미 LIMIT 5 적용됨)
-            "neighbors": self._get_cpu_neighbors(start_ns, end_ns, context_start_ns),
-            
-            # 4. rhythm/binder: 전체 (데이터 양이 적어 전체 맥락 파악에 유리)
-            "rhythm": self._get_state_transition_rhythm(upid, start_ns, end_ns, context_start_ns),
-            "binder": self._get_binder_payload(upid, start_ns, end_ns, context_start_ns)
+            "virtual_stack_trace": self._get_vertical_stack(tp_s, utid, start_ns, end_ns),
+            "binder_transactions": self._get_binder_payload(tp_s, utid, start_ns, end_ns),
+            "monitor_locks": self._get_lock_contention(tp_s, utid, start_ns, end_ns)
         }
 
-    def _get_vertical_stack(self, upid, start_ns, end_ns, context_start_ns):
-        query = f"""
-            SELECT name, depth, 
-                   SUM(MIN(ts + dur, {end_ns}) - MAX(ts, {start_ns})) / 1e6 as effective_ms
-            FROM slice JOIN thread_track ON slice.track_id = thread_track.id
-            JOIN thread USING (utid)
-            WHERE upid = {upid} AND ts < {end_ns} AND (ts + dur) > {context_start_ns}
-            GROUP BY 1, 2 HAVING effective_ms > 0.1 ORDER BY effective_ms DESC
-        """
-        return self._common_api.tp_s.query(query).as_pandas_dataframe().to_dict(orient='records')
-
-    def _get_lock_contention(self, start_ns, end_ns, context_start_ns):
+    def _get_vertical_stack(self, tp, utid, start_ns, end_ns):
         query = f"""
             SELECT 
-                s.name as lock_name, 
-                t.name as thread_name,
-                t.tid as tid,
-                SUM(MIN(s.ts + s.dur, {end_ns}) - MAX(s.ts, {start_ns})) / 1e6 as wait_ms,
-                SUBSTR(s.name, INSTR(s.name, 'object ') + 7) as lock_id
-            FROM slice s 
-            JOIN thread_track tt ON s.track_id = tt.id 
-            JOIN thread t USING (utid)
-            WHERE (s.name LIKE 'monitor contention%' OR s.name LIKE 'waiting on%')
-            AND s.ts < {end_ns} AND (s.ts + s.dur) > {context_start_ns}
-            GROUP BY 1, 2 ORDER BY wait_ms DESC
+                slice.depth as depth_level, 
+                COALESCE(slice.name, '<unnamed_slice>') as method_fullname, 
+                round(slice.dur / 1e6, 2) as duration_milliseconds
+            FROM slice
+            JOIN thread_track ON slice.track_id = thread_track.id
+            WHERE thread_track.utid = {utid}
+            AND slice.ts < {end_ns} AND (slice.ts + slice.dur) > {start_ns}
+            ORDER BY slice.ts ASC, slice.depth ASC
+            LIMIT 25
         """
-        return self._common_api.tp_s.query(query).as_pandas_dataframe().to_dict(orient='records')
+        return tp.query(query).as_pandas_dataframe().to_dict(orient='records')
 
-    def _get_cpu_neighbors(self, start_ns, end_ns, context_start_ns):
-        query = f"""
-            SELECT p.name as proc_name, 
-                   SUM(MIN(sched.ts + sched.dur, {end_ns}) - MAX(sched.ts, {start_ns})) / 1e6 as cpu_ms
-            FROM sched JOIN thread t USING (utid) JOIN process p USING (upid)
-            WHERE sched.ts < {end_ns} AND (sched.ts + sched.dur) > {context_start_ns}
-            AND p.name != '{self.package}'
-            GROUP BY 1 ORDER BY cpu_ms DESC LIMIT 5
-        """
-        return self._common_api.tp_s.query(query).as_pandas_dataframe().to_dict(orient='records')
-
-    def _get_state_transition_rhythm(self, upid, start_ns, end_ns, context_start_ns):
-        query = f"""
-            SELECT state, COUNT(*) as transitions,
-                   SUM(MIN(ts + dur, {end_ns}) - MAX(ts, {start_ns})) / 1e6 as total_ms
-            FROM thread_state JOIN thread USING (utid)
-            WHERE upid = {upid} AND ts < {end_ns} AND (ts + dur) > {context_start_ns}
-            GROUP BY 1
-        """
-        return self._common_api.tp_s.query(query).as_pandas_dataframe().to_dict(orient='records')
-
-    def _get_binder_detailed_info(self, upid, start_ns, end_ns, context_start_ns):
+    def _get_binder_payload(self, tp, utid, start_ns, end_ns):
         query = f"""
             SELECT 
-                CASE 
-                    WHEN s.name LIKE '%reply%' THEN 'Reply_Wait' 
-                    WHEN s.name LIKE '%async%' THEN 'Async_Call'
-                    ELSE 'Sync_Call' 
-                END as binder_type,
-                t.name as src_thread,
-                COUNT(*) as count, 
-                SUM(MIN(s.ts + s.dur, {end_ns}) - MAX(s.ts, {start_ns})) / 1e6 as total_ms
-            FROM slice s
-            JOIN thread_track tt ON s.track_id = tt.id
-            JOIN thread t USING (utid)
-            WHERE t.upid = {upid} 
-            AND s.name LIKE 'binder%'
-            AND s.ts < {end_ns} AND (s.ts + s.dur) > {context_start_ns}
-            GROUP BY 1, 2
-            ORDER BY total_ms DESC
+                COALESCE((SELECT p.name FROM process p JOIN thread t USING(upid) WHERE t.utid = {utid}), '{self.package}') as caller_process_name,
+                COALESCE((SELECT name FROM thread WHERE utid = {utid}), '<unknown_thread>') as caller_thread_name,
+                COALESCE(EXTRACT_ARG(slice.arg_set_id, 'destination_package'), '<unknown_destination>') as target_process_name,
+                COALESCE(slice.name, 'binder_call') as method_name, 
+                round(slice.dur / 1e6, 2) as wait_milliseconds
+            FROM slice
+            JOIN thread_track ON slice.track_id = thread_track.id
+            WHERE thread_track.utid = {utid}
+            AND (slice.name LIKE 'binder %' OR slice.name LIKE 'reply %')
+            AND slice.ts < {end_ns} AND (slice.ts + slice.dur) > {start_ns}
+            ORDER BY slice.dur DESC
+            LIMIT 20
         """
-        return self._common_api.tp_s.query(query).as_pandas_dataframe().to_dict(orient='records')
+        return tp.query(query).as_pandas_dataframe().to_dict(orient='records')
+
+    def _get_lock_contention(self, tp, utid, start_ns, end_ns):
+        query = f"""
+            SELECT 
+                COALESCE(slice.name, 'monitor_lock') as lock_name, 
+                round(slice.dur / 1e6, 2) as wait_milliseconds,
+                COALESCE(EXTRACT_ARG(slice.arg_set_id, 'owner_thread_name'), '<no_holder_info>') as lock_holder_thread_name
+            FROM slice
+            JOIN thread_track ON slice.track_id = thread_track.id
+            WHERE thread_track.utid = {utid}
+            AND (slice.name LIKE '%contention%' OR slice.name LIKE '%Lock%')
+            AND slice.ts < {end_ns} AND (slice.ts + slice.dur) > {start_ns}
+            ORDER BY slice.dur DESC
+            LIMIT 10
+        """
+        return tp.query(query).as_pandas_dataframe().to_dict(orient='records')
