@@ -6,53 +6,22 @@ class InsightScanPromptValues:
 **Role:** Android System Performance Investigator.
 
 **LANGUAGE RULE (STRICT):**
-- Output MUST be in English only.
-- Chinese, Korean, or any other language is strictly forbidden.
-- If you are about to write in any language other than English, STOP and switch to English.
-- The final answer MUST start with "Root Cause (Detailed Logical Chain):"
+- Output MUST be in English only. No Chinese, Korean, or any other language.
 
 **[INSTRUCTIONS]**
-- FIRST, select the node with the highest `impact_ratio` EXACTLY as provided.
-- THEN, apply the classification rules below.
-- Use ONLY the flag values provided in JSON. No arithmetic. No assumptions.
-- Analyze ONLY the selected node and its role in the stack context.
-- Explain WHY this node is the bottleneck based on its flags and position in the call stack.
+- Select the node with the highest `impact_ratio` from the provided data.
+- If tied on `impact_ratio`, select the node with the higher `wait_time`. If still tied, select the node with the higher `delta_time`.
+- Use ONLY values from the provided data. No arithmetic. No assumptions.
 
 **[STRICT PRIORITY]** (Choose EXACTLY ONE)
 1. Native Cliff: if `is_native_cliff == true`
 2. Resource Contention: if `is_resource_contention == true`
 3. Ghost Gap: if `has_ghost_gap == true`
-4. Logic Heavy: Default
-
-**[OUTPUT CONSTRAINTS]**
-- Output ONLY the specified format.
-- Do NOT include any content outside the defined sections.
-- Ensure the answer starts exactly with "Root Cause (Detailed Logical Chain):"
+4. Logic Heavy: Default (when `is_native_cliff`, `is_resource_contention`, and `has_ghost_gap` are all false)
 
 **[OUTPUT FORMAT]**
-Root Cause (Detailed Logical Chain):
-Step 1 (Observation):
-- Node: {name}
-- self_time: {self_time}
-- wait_time: {wait_time}
-- ghost_gap: {ghost_gap}
-
-Step 2 (Inference):
-- Based on the selected flag, explain the technical meaning of this bottleneck.
-- Describe how this node's position in the call stack contributes to the overall delay.
-- Do NOT reference flags that are false.
-
-Step 3 (Conclusion):
-- Classification: [Write EXACTLY ONE word from this list: Native Cliff, Resource Contention, Ghost Gap, Logic Heavy]
-- Summary: [One sentence explaining the final nature of the delay.]
-
-Metrics Analysis:
-- Selected Node:
-  name / self_time / wait_time / ghost_gap / impact_ratio
-
-Anomaly Report:
-- Native Cliff: (Yes/No, based on selected node)
-- Ghost Gap: (Yes/No, based on selected node)
+- target_id: [Copy the exact target_id value from the selected node.]
+- Summary: [Write one detailed paragraph. Include: (1) what metrics indicate the bottleneck, (2) why this node is responsible based on its position in the call stack, (3) what the selected flag technically means in this context, and (4) the final conclusion on the nature of the delay. Be specific, technical, and cite exact values from the provided data.]
 """
 
     @staticmethod
