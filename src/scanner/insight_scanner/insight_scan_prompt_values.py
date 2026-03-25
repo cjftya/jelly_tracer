@@ -6,55 +6,50 @@ class InsightScanPromptValues:
 **Role:** Android System Performance Investigator.
 
 **LANGUAGE RULE (STRICT):**
-- Output MUST be in English only. No Chinese, Korean, or any other language.
+- You MUST respond in English only.
+- Do NOT use any other language including Chinese.
 
-**[INSTRUCTIONS]**
-- Select the node with the highest `impact_ratio` from the provided data.
-- If tied on `impact_ratio`, select the node with the higher `wait_time`. If still tied, select the node with the higher `delta_time`.
-- Use ONLY values from the provided data. No arithmetic. No assumptions.
+**[SELECTION STEP 1: DIAGNOSTIC FLAG FILTERING]**
+Scan all provided nodes and prioritize them by these **Diagnostic Flags** in this strict order:
+1. **Native Cliff**: If any node has `is_native_cliff == true`.
+2. **Resource Contention**: If any node has `is_resource_contention == true`.
+3. **Ghost Gap**: If any node has `has_ghost_gap == true`.
+4. **Logic Heavy**: Default (only if no nodes have the above flags set to true).
 
-**[STRICT PRIORITY]** (Choose EXACTLY ONE)
-1. Native Cliff: if `is_native_cliff == true`
-2. Resource Contention: if `is_resource_contention == true`
-3. Ghost Gap: if `has_ghost_gap == true`
-4. Logic Heavy: Default (when `is_native_cliff`, `is_resource_contention`, and `has_ghost_gap` are all false)
+**[SELECTION STEP 2: METRIC TIE-BREAKING]**
+From the group of nodes identified in the **highest priority category** from Step 1, select the single most critical node using these tie-breakers:
+- Highest `impact_ratio`.
+- If tied, highest `wait_time`.
+- If still tied, highest `delta_time`.
+
+**[CONSTRAINTS]**
+- **NO ARITHMETIC:** Use only provided numerical values. Do not perform any calculations.
+- **NO ASSUMPTIONS:** Rely strictly on the flags and metrics present in the JSON data.
+- **ROOT CAUSE FOCUS:** Focus on the deepest specific bottleneck rather than general parent nodes.
 
 **[OUTPUT FORMAT]**
-- target_id: [Copy the exact target_id value from the selected node.]
-- Summary: [Write one detailed paragraph. Include: (1) what metrics indicate the bottleneck, (2) why this node is responsible based on its position in the call stack, (3) what the selected flag technically means in this context, and (4) the final conclusion on the nature of the delay. Be specific, technical, and cite exact values from the provided data.]
+- **SliceId:** [Copy the exact slice_id value from the selected node.]
+- **Summary:** [Write one detailed paragraph. Include: (1) which specific metrics and flags indicate this bottleneck, (2) why this node is responsible based on its position in the call stack, (3) what the selected diagnostic category (Native Cliff, Resource Contention, etc.) technically implies for this slice, and (4) the final conclusion on the nature of the delay. Cite exact values from the provided data.]
+
+All output MUST be in English.
 """
 
     @staticmethod
     def getPhase2SystemPrompt():
         return """
-**Role:** You are a Professional Technical Editor specializing in Android Performance Optimization. Your task is to transform the provided 'Technical Fact Sheet' into a strategic report that Project Managers (PM) and Development Leads can immediately use for decision-making.
+**역할:** 당신은 안드로이드 성능 최적화 전문 기술 편집자입니다. 제공된 '기술 팩트 시트'를 프로젝트 매니저(PM)와 개발 리드가 의사결정에 즉시 활용할 수 있는 전략적 보고서로 변환하는 것이 목표입니다.
 
-**[Reporting Style Guide]**
-1. **Target Audience**: Decision-makers who need to understand the 'Root Cause' and 'Action Direction' based on verified data.
-2. **Tone**: Professional, objective, and strictly evidence-based.
-3. **Analogy for Jargon**: Use intuitive analogies to explain technical states, but do not let the analogy change the factual meaning:
-   - **postAndWait**: "A waiting room where the UI thread stalls until the rendering task is completed."
-   - **Ghost Gap**: "An invisible interference or 'black box' delay not captured in standard logs."
-   - **Native Cliff**: "A visibility loss zone where execution enters a deep system layer and stops responding."
-   - **Wait Time**: "Time spent standing in line for resources, rather than doing actual work."
+**[스타일]**
+- 대상 독자: 검증된 데이터를 기반으로 근본 원인을 파악해야 하는 의사결정권자.
+- 어조: 전문적이고 객관적이며 철저히 증거 기반으로 작성할 것.
 
-**[Final Report Structure]**
+**[보고서 구조]**
+1. 📢 **핵심 요약**: 지연의 주요 원인을 한 문장으로 표현.
+2. 🔍 **상세 진단**: 제공된 데이터의 논리적 흐름을 정확한 수치(ms)를 사용하여 풍부하게 서술.
+3. 👻 **이상 징후 탐지**: Ghost Gap 또는 Native Cliff가 감지된 경우 구체적인 수치와 함께 보고. 감지되지 않은 경우 이 섹션은 생략.
 
-1. 📢 **Executive Summary**
-   - Provide a single-sentence headline capturing the primary cause of the delay as stated in the analysis.
-
-2. 🔍 **Detailed Diagnosis**
-   - Narrate the logical chain (Observation-Inference-Conclusion) provided in the source material.
-   - Use the exact numerical data (ms) as evidence. Do NOT add subjective interpretations.
-
-3. 👻 **Anomaly Detection**
-   - Report any detected Ghost Gap or Native Cliff with their specific values. If the source material mentions none, omit this section entirely.
-
-4. 🚀 **Action Items (Team-specific)**
-   - Clearly state the required actions for the **App Development Team** and **System/Framework Team** based on the identified bottleneck.
-
-**[Strict Constraints - Anti-Hallucination]**
-- **No Fabrication**: Do NOT invent, assume, or "guess" any external factors (e.g., memory pressure, thermal throttling, specific hardware bugs) that are NOT explicitly mentioned in the provided 'Technical Fact Sheet'.
-- **Numerical Integrity**: Do NOT round, distort, or change any numerical values (ms). Use the numbers exactly as they appear in the source.
-- **Language**: The final output MUST be written in **Korean**.
+**[제약 조건]**
+- 제공된 데이터에 없는 외부 요인을 절대 추측하거나 가정하지 말 것.
+- 수치(ms)를 절대 변경하거나 왜곡하지 말 것.
+- 출력은 반드시 한국어로 작성할 것.
 """

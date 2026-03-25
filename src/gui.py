@@ -7,6 +7,12 @@ import tkinter as tk
 from tkinter import filedialog, messagebox
 
 import customtkinter as ctk
+try:
+    from PIL import Image, ImageDraw, ImageFont
+    from pilmoji import Pilmoji
+    HAS_PILMOJI = True
+except ImportError:
+    HAS_PILMOJI = False
 
 from engine import Engine
 
@@ -95,6 +101,64 @@ class ExecutorThread(threading.Thread):
         self._stop_event.set()
 
 
+class CTkPilmojiLabel(ctk.CTkLabel):
+    """Render colored emojis using pilmoji inside a CTkLabel (via CTkImage)."""
+    def __init__(self, master, font_size=15, font_path="C:\\Windows\\Fonts\\malgunbd.ttf", **kwargs):
+        self._font_size = font_size
+        self._font_path = font_path
+        self._text_color = kwargs.get("text_color", "#D0D0D0")
+        self._original_text = kwargs.get("text", "")
+        # Suppress standard text rendering
+        kwargs["text"] = ""
+        super().__init__(master, **kwargs)
+        
+        if self._original_text:
+            self.set_text(self._original_text)
+
+    def set_text(self, text: str):
+        self._original_text = text
+        if not HAS_PILMOJI:
+            self.configure(text=text)
+            return
+
+        try:
+            font = ImageFont.truetype(self._font_path, self._font_size)
+        except Exception:
+            try:
+                font = ImageFont.truetype("C:\\Windows\\Fonts\\malgunbd.ttf", self._font_size)
+            except Exception:
+                font = ImageFont.load_default()
+
+        # Measurement using dummy image
+        dummy = Image.new("RGBA", (1, 1), (0, 0, 0, 0))
+        with Pilmoji(dummy) as pilmoji:
+            w, h = pilmoji.getsize(text, font=font)
+            # Add some padding
+            w = int(w) + 10
+            h = int(h) + 15
+
+        # Render RGBA image with transparent background
+        img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+        with Pilmoji(img) as pilmoji:
+            # Draw with the exact text_color
+            pilmoji.text((0, 5), text, font=font, fill=self._get_current_color())
+
+        # Create and set CTkImage
+        ctk_img = ctk.CTkImage(light_image=img, dark_image=img, size=(w, h))
+        self.configure(image=ctk_img)
+
+    def _get_current_color(self):
+        color = self.cget("text_color")
+        return color if color else self._text_color
+
+    def configure(self, **kwargs):
+        # Intercept text updates
+        if "text" in kwargs:
+            text = kwargs.pop("text")
+            self.set_text(text)
+        super().configure(**kwargs)
+
+
 class TraceGui(ctk.CTk):
     def __init__(self):
         super().__init__()
@@ -108,11 +172,11 @@ class TraceGui(ctk.CTk):
 
         # Theme & Appearance
         ctk.set_appearance_mode("dark")
-        ctk.set_default_color_theme("blue")
+        ctk.set_default_color_theme("blue") # Keep blue theme but customize colors below
 
         self.thread: ExecutorThread | None = None
         self.engine = Engine(gui=self)
-        self.console_font_size = 10
+        self.console_font_size = 12
         self.range_data = []
 
         # Configure Grid
@@ -151,19 +215,19 @@ class TraceGui(ctk.CTk):
     def _build_ui(self):
         # --- Sidebar ---
         self.sidebar_frame = ctk.CTkScrollableFrame(
-            self, width=280, corner_radius=0, fg_color="#1A1A1A",
-            scrollbar_button_color="#333333",
-            scrollbar_button_hover_color="#444444"
+            self, width=280, corner_radius=0, fg_color="#010409",
+            scrollbar_button_color="#21262D",
+            scrollbar_button_hover_color="#30363D"
         )
         self.sidebar_frame.grid(row=0, column=0, sticky="nsew")
         self.sidebar_frame.grid_columnconfigure(0, weight=1)
 
         # Trace Settings Group
-        self.settings_label = ctk.CTkLabel(
+        self.settings_label = CTkPilmojiLabel(
             self.sidebar_frame,
-            text="CONFIGURATION",
-            font=ctk.CTkFont(family="Segoe UI Emoji", size=12, weight="bold"),
-            text_color="#D0D0D0",
+            text="⚙️ CONFIGURATION",
+            font_size=13,
+            text_color="#FFFFFF",
             anchor="w",
         )
         self.settings_label.grid(row=0, column=0, padx=25, pady=(40, 10), sticky="ew")
@@ -172,17 +236,19 @@ class TraceGui(ctk.CTk):
             self.sidebar_frame,
             placeholder_text="Target package",
             height=40,
-            border_width=1,
-            fg_color="#242424",
+            border_width=0,
+            fg_color="#0D1117",
+            corner_radius=4,
+            font=ctk.CTkFont(weight="bold")
         )
         self.package_edit.insert(0, "com.sec.android.gallery3d")
         self.package_edit.grid(row=1, column=0, padx=25, pady=10, sticky="ew")
 
-        self.model_label = ctk.CTkLabel(
+        self.model_label = CTkPilmojiLabel(
             self.sidebar_frame,
-            text="AI Model",
-            font=ctk.CTkFont(family="Segoe UI Emoji", size=11, weight="bold"),
-            text_color="#D0D0D0",
+            text="🤖 AI MODEL",
+            font_size=12,
+            text_color="#94A3B8",
             anchor="w",
         )
         self.model_label.grid(row=2, column=0, padx=25, pady=(5, 0), sticky="ew")
@@ -191,9 +257,12 @@ class TraceGui(ctk.CTk):
             self.sidebar_frame,
             values=["empty"],
             height=40,
-            fg_color="#242424",
-            button_color="#333333",
-            button_hover_color="#444444",
+            fg_color="#21262D",
+            button_color="#30363D",
+            button_hover_color="#3D444D",
+            corner_radius=4,
+            font=ctk.CTkFont(weight="bold"),
+            dropdown_font=ctk.CTkFont(weight="bold")
         )
         self.model_combo.set("model")
         self.model_combo.grid(row=3, column=0, padx=25, pady=(0, 10), sticky="ew")
@@ -203,19 +272,21 @@ class TraceGui(ctk.CTk):
             self.sidebar_frame,
             text="LOAD TRACE DATA",
             command=self._on_load_data,
-            height=40,
-            fg_color="#1F538D",
-            hover_color="#2666AD",
+            height=42,
+            fg_color="#21262D",
+            hover_color="#30363D",
+            corner_radius=4,
+            border_width=0,
             font=ctk.CTkFont(size=12, weight="bold"),
         )
         self.btn_load_data.grid(row=4, column=0, padx=25, pady=(20, 10), sticky="ew")
 
         # Range Selection
-        self.range_label = ctk.CTkLabel(
+        self.range_label = CTkPilmojiLabel(
             self.sidebar_frame,
-            text="SCAN RANGE",
-            font=ctk.CTkFont(family="Segoe UI Emoji", size=11, weight="bold"),
-            text_color="#D0D0D0",
+            text="📏 SCAN RANGE",
+            font_size=12,
+            text_color="#94A3B8",
             anchor="w",
         )
         self.range_label.grid(row=7, column=0, padx=25, pady=(15, 0), sticky="ew")
@@ -227,39 +298,39 @@ class TraceGui(ctk.CTk):
         self.start_slider = ctk.CTkSlider(
             self.range_frame, from_=0, to=100, height=16,
             command=self._on_range_change,
-            progress_color="#1F538D",
-            button_color="#1F538D",
-            button_hover_color="#2666AD",
+            progress_color="#4285F4",
+            button_color="#E6EDF3",
+            button_hover_color="#FFFFFF",
             state="disabled"
         )
         self.start_slider.set(0)
         self.start_slider.grid(row=0, column=0, sticky="ew", pady=(5, 0))
         self.start_val_label = ctk.CTkLabel(
-            self.range_frame, text="Start: -", font=ctk.CTkFont(family="Segoe UI Emoji", size=11), text_color="#CCCCCC", anchor="w"
+            self.range_frame, text="Start: -", font=ctk.CTkFont(family="Segoe UI Emoji", size=11, weight="bold"), text_color="#A0A0A0", anchor="w"
         )
         self.start_val_label.grid(row=1, column=0, sticky="ew", pady=(0, 5))
 
         self.end_slider = ctk.CTkSlider(
             self.range_frame, from_=0, to=100, height=16,
             command=self._on_range_change,
-            progress_color="#1F538D",
-            button_color="#1F538D",
-            button_hover_color="#2666AD",
+            progress_color="#4285F4",
+            button_color="#E6EDF3",
+            button_hover_color="#FFFFFF",
             state="disabled"
         )
         self.end_slider.set(100)
         self.end_slider.grid(row=2, column=0, sticky="ew", pady=(5, 0))
         self.end_val_label = ctk.CTkLabel(
-            self.range_frame, text="End: -", font=ctk.CTkFont(family="Segoe UI Emoji", size=11), text_color="#CCCCCC", anchor="w"
+            self.range_frame, text="End: -", font=ctk.CTkFont(family="Segoe UI Emoji", size=11, weight="bold"), text_color="#A0A0A0", anchor="w"
         )
         self.end_val_label.grid(row=3, column=0, sticky="ew")
 
         # Separator-like padding
-        self.path_label = ctk.CTkLabel(
+        self.path_label = CTkPilmojiLabel(
             self.sidebar_frame,
-            text="RESOURCES",
-            font=ctk.CTkFont(family="Segoe UI Emoji", size=12, weight="bold"),
-            text_color="#D0D0D0",
+            text="📂 RESOURCES",
+            font_size=13,
+            text_color="#FFFFFF",
             anchor="w",
         )
         self.path_label.grid(row=11, column=0, padx=25, pady=(20, 10), sticky="ew")
@@ -273,7 +344,10 @@ class TraceGui(ctk.CTk):
             self.path_frame,
             placeholder_text="Normal trace path",
             height=35,
-            fg_color="#242424",
+            fg_color="#0D1117",
+            border_width=0,
+            corner_radius=4,
+            font=ctk.CTkFont(weight="bold")
         )
         self.normal_edit.grid(row=0, column=0, sticky="ew", pady=(0, 5))
         self.btn_n = ctk.CTkButton(
@@ -281,9 +355,12 @@ class TraceGui(ctk.CTk):
             text="Browse Normal",
             command=lambda: self._choose_path(self.normal_edit),
             height=32,
-            fg_color="#333333",
-            hover_color="#444444",
-            text_color="#AAAAAA",
+            fg_color="#21262D",
+            border_width=0,
+            hover_color="#30363D",
+            text_color="#8B949E",
+            corner_radius=4,
+            font=ctk.CTkFont(weight="bold")
         )
         self.btn_n.grid(row=1, column=0, sticky="ew", pady=(0, 20))
 
@@ -291,7 +368,10 @@ class TraceGui(ctk.CTk):
             self.path_frame,
             placeholder_text="Slow trace path",
             height=35,
-            fg_color="#242424",
+            fg_color="#0D1117",
+            border_width=0,
+            corner_radius=4,
+            font=ctk.CTkFont(weight="bold")
         )
         self.slow_edit.grid(row=2, column=0, sticky="ew", pady=(0, 5))
         self.btn_s = ctk.CTkButton(
@@ -299,14 +379,17 @@ class TraceGui(ctk.CTk):
             text="Browse Slow",
             command=lambda: self._choose_path(self.slow_edit),
             height=32,
-            fg_color="#333333",
-            hover_color="#444444",
-            text_color="#AAAAAA",
+            fg_color="#21262D",
+            border_width=0,
+            hover_color="#30363D",
+            text_color="#8B949E",
+            corner_radius=4,
+            font=ctk.CTkFont(weight="bold")
         )
         self.btn_s.grid(row=3, column=0, sticky="ew")
 
         # --- Main Content ---
-        self.main_container = ctk.CTkFrame(self, corner_radius=0, fg_color="#0F0F0F")
+        self.main_container = ctk.CTkFrame(self, corner_radius=0, fg_color="#0D1117")
         self.main_container.grid(row=0, column=1, sticky="nsew")
         self.main_container.grid_columnconfigure(0, weight=1)
         self.main_container.grid_rowconfigure(3, weight=1)  # Console row should expand
@@ -319,10 +402,11 @@ class TraceGui(ctk.CTk):
         self.header_frame.grid(row=0, column=0, sticky="ew", padx=30, pady=(30, 20))
         self.header_frame.grid_columnconfigure(0, weight=1)
 
-        self.status_label = ctk.CTkLabel(
+        self.status_label = CTkPilmojiLabel(
             self.header_frame,
             text="💤 System Standby",
-            font=ctk.CTkFont(family="Segoe UI Emoji", size=24, weight="bold"),
+            font_size=26,
+            text_color="#FFFFFF"
         )
         self.status_label.grid(row=0, column=0, sticky="w")
 
@@ -332,10 +416,10 @@ class TraceGui(ctk.CTk):
             command=self._on_run,
             font=ctk.CTkFont(size=12, weight="bold"),
             height=45,
-            width=180,
-            fg_color="#1F538D",
-            hover_color="#2666AD",
-            corner_radius=5,
+            width=200,
+            fg_color="#21262D",
+            hover_color="#30363D",
+            corner_radius=4,
             state="disabled"
         )
         self.run_button.grid(row=0, column=1, sticky="e")
@@ -344,9 +428,8 @@ class TraceGui(ctk.CTk):
         self.stats_frame = ctk.CTkFrame(
             self.main_container,
             corner_radius=8,
-            fg_color="#161616",
-            border_width=1,
-            border_color="#222222",
+            fg_color="#161B22",
+            border_width=0,
         )
         self.stats_frame.grid(row=1, column=0, sticky="ew", pady=(0, 30), padx=30)
         self.stats_frame.grid_columnconfigure(0, weight=1)
@@ -357,13 +440,13 @@ class TraceGui(ctk.CTk):
         self.token_label = ctk.CTkLabel(
             self.token_info_frame,
             text="Tokens: 0 / 0 (0%)",
-            font=ctk.CTkFont(family="Consolas", size=13),
-            text_color="#888888",
+            font=ctk.CTkFont(family="Consolas", size=12, weight="bold"),
+            text_color="#94A3B8",
         )
         self.token_label.pack(side="left")
 
         self.token_bar = ctk.CTkProgressBar(
-            self.stats_frame, height=8, progress_color="#1F538D", fg_color="#333333"
+            self.stats_frame, height=8, progress_color="#4285F4", fg_color="#21262D"
         )
         self.token_bar.set(0)
         self.token_bar.pack(fill="x", padx=25, pady=(0, 20))
@@ -372,7 +455,7 @@ class TraceGui(ctk.CTk):
         self.realtime_status = ctk.CTkLabel(
             self.main_container,
             text="",
-            font=ctk.CTkFont(family="Consolas", size=14, weight="bold"),
+            font=ctk.CTkFont(family="Consolas", size=16, weight="bold"),
             text_color="#569CD6",
             anchor="w",
             height=25,
@@ -383,9 +466,8 @@ class TraceGui(ctk.CTk):
         self.console_frame = ctk.CTkFrame(
             self.main_container,
             corner_radius=8,
-            fg_color="#121212",
-            border_width=1,
-            border_color="#222222",
+            fg_color="#0D1117",
+            border_width=0,
         )
         self.console_frame.grid(row=3, column=0, sticky="nsew", padx=30, pady=(0, 30))
         self.console_frame.grid_rowconfigure(0, weight=1)
@@ -395,22 +477,24 @@ class TraceGui(ctk.CTk):
         self.paned_window = tk.PanedWindow(
             self.console_frame,
             orient=tk.HORIZONTAL,
-            bg="#1A1A1A",
-            sashwidth=4,
+            bg="#0D1117",      # Match Dark Graphite background
+            sashwidth=4,       # Slightly wider sash for better grab
+            sashpad=0,
             bd=0,
             sashrelief=tk.FLAT,
+            borderwidth=0
         )
         self.paned_window.grid(row=0, column=0, sticky="nsew", padx=0, pady=0)
 
         # Left Pane: AI
         self.left_pane = ctk.CTkFrame(
-            self.paned_window, fg_color="#0F0F0F", corner_radius=0
+            self.paned_window, fg_color="#0D1117", corner_radius=0
         )
-        self.left_header = ctk.CTkLabel(
+        self.left_header = CTkPilmojiLabel(
             self.left_pane,
-            text=" AI INVESTIGATOR",
-            font=ctk.CTkFont(size=11, weight="bold"),
-            text_color="#D0D0D0",
+            text=" 🤖 AI INVESTIGATOR",
+            font_size=14,
+            text_color="#4285F4",
             anchor="w",
             height=20,
         )
@@ -419,13 +503,12 @@ class TraceGui(ctk.CTk):
         self.text_edit = ctk.CTkTextbox(
             self.left_pane,
             font=("Segoe UI Emoji", self.console_font_size),
-            fg_color="#0F0F0F",
-            text_color="#CCCCCC",
-            border_width=1,
-            border_color="#222222",
-            corner_radius=8,
-            scrollbar_button_color="#333333",
-            scrollbar_button_hover_color="#444444",
+            fg_color="#010409",
+            text_color="#E6EDF3",
+            border_width=0,
+            corner_radius=4,
+            scrollbar_button_color="#21262D",
+            scrollbar_button_hover_color="#30363D",
             spacing1=5,
             spacing3=5,
         )
@@ -434,13 +517,13 @@ class TraceGui(ctk.CTk):
 
         # Right Pane: System
         self.right_pane = ctk.CTkFrame(
-            self.paned_window, fg_color="#0F0F0F", corner_radius=0
+            self.paned_window, fg_color="#0D1117", corner_radius=0
         )
-        self.right_header = ctk.CTkLabel(
+        self.right_header = CTkPilmojiLabel(
             self.right_pane,
-            text=" SYSTEM LOG",
-            font=ctk.CTkFont(size=11, weight="bold"),
-            text_color="#D0D0D0",
+            text=" 💻 SYSTEM LOG",
+            font_size=14,
+            text_color="#94A3B8",
             anchor="w",
             height=20,
         )
@@ -449,13 +532,12 @@ class TraceGui(ctk.CTk):
         self.system_edit = ctk.CTkTextbox(
             self.right_pane,
             font=("Segoe UI Emoji", self.console_font_size),
-            fg_color="#0F0F0F",
-            text_color="#CCCCCC",
-            border_width=1,
-            border_color="#222222",
-            corner_radius=8,
-            scrollbar_button_color="#333333",
-            scrollbar_button_hover_color="#444444",
+            fg_color="#010409",
+            text_color="#94A3B8",
+            border_width=0,
+            corner_radius=4,
+            scrollbar_button_color="#21262D",
+            scrollbar_button_hover_color="#30363D",
             spacing1=5,
             spacing3=5,
         )
@@ -576,7 +658,6 @@ class TraceGui(ctk.CTk):
         
         self.status_label.configure(text="📦 Data Loaded - Ready")
         messagebox.showinfo("Load Data", "Trace data loaded successfully. Analysis tools are now enabled.")
-        print("System: Trace data loaded. Analysis ready.")
 
     def _on_load_error(self, error):
         """Callback for failed data loading."""
@@ -604,7 +685,7 @@ class TraceGui(ctk.CTk):
         for widget, title in [(self.text_edit, "AI ANALYSIS SESSION"), (self.system_edit, "SYSTEM LOG SESSION")]:
             widget.configure(state="normal")
             if widget.get("1.0", "end-1c").strip():
-                separator = f"\n\n{'='*15} {title} ({time.strftime('%H:%M:%S')}) {'='*15}\n\n"
+                separator = f"\n\n{'='*15} 🧠 {title} ({time.strftime('%H:%M:%S')}) {'='*15}\n\n"
                 widget.insert("end", separator)
             widget.configure(state="disabled")
 

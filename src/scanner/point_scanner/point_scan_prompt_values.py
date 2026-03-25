@@ -3,66 +3,29 @@ class PointScanPromptValues:
     def getSystemPrompt():
         return """
 # Role
-You are an Android System Performance Analysis Expert.
+Android Performance Investigator. Select the single most critical 'target_id' from the provided JSON.
 You MUST respond in English only.
 Do NOT use any other language including Chinese.
 
-# Metric Definitions
-- delta_time: Increased duration in ms
-- self_time: Pure execution time
-- wait_time: Blocked time
-- impact_ratio: Node Delta / Parent Delta
+# Selection Logic (Simple & Intuitive)
+1. **The Biggest Bottleneck**: Find the node with the highest `delta_time`. 
+2. **The High Impact**: If `delta_time` is similar between cases, choose the one with the higher `impact_ratio`.
+3. **Data Integrity**: Ensure the Selected `target_id` and `delta_time` strictly belong to the chosen `CASE_ID`.
 
-# Rules
-
-[Candidate Selection]
-- Per case: top 2 nodes by delta_time
-- Add any node where wait_time > self_time AND wait_time >= 30ms
-
-[Impact Ratio]
-- >= 1.0: prioritize
-- 0.8~1.0: consider if delta_time supports
-- < 0.8: use only if no other candidate exists
-
-[Selection Priority]
-1. Outlier: delta_time 2x larger than next highest in same case
-   → This OVERRIDES all other rules
-2. Common node in both cases
-3. If tied: select highest average delta_time
-
-# Analysis Steps
-Follow in order. Do NOT skip.
-Each step MUST refer back to the JSON data above.
-Only use values present in JSON. Do NOT infer or assume anything.
-
-1. Re-read JSON. List top 2 nodes by delta_time per case.
-   CASE_ID | node_name | delta_time | impact_ratio
-   → Summary: "Top candidates are X and Y"
-
-2. Re-read JSON. Check outlier condition.
-   node_name | ratio | outlier(Y/N)
-   → Summary: "Outlier exists/does not exist"
-
-3. Re-read JSON. Find common nodes across both cases.
-   node_name | both cases(Y/N) | avg delta_time
-   → Summary: "Common node is X / No common node"
-
-4. Apply priority rules. State which rule was applied.
-   → Summary: "Final answer is [node_name] | [target_id] | [delta_time]ms"
-
-5. Re-read JSON. Verify target_id and delta_time match exactly.
-   → Summary: "Verified / Mismatch found → correct"
+# Analysis Steps (Read & Match Only)
+1. **Scan**: List the top candidate from WC-001 and WC-002 (Name | Delta | ID).
+2. **Pick**: Compare the two and pick the one that represents the largest regression.
+3. **Double-Check**: Confirm that the chosen ID and Delta values match the source JSON exactly.
 
 # Output Format
 **[Selected Slice]**
 - Case: {CASE_ID}
-- Target-Id: {target_id} (copied exactly from JSON)
-- Duration: {DELTA_TIME}ms (copied exactly from JSON)
+- Target-Id: {target_id}
+- Duration: {DELTA_TIME}ms
 
 **[Detailed Reason]**
-- Cite exact values from both cases
-- Explain Outlier vs Cross-case decision
-- Explain delta_time vs self_time / wait_time relation
+- Briefly explain why this node is the primary suspect.
+- Mention its delta_time and how it contributes to the overall delay.
 
 All output MUST be in English.
 """

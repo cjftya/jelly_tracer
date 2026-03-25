@@ -110,18 +110,22 @@ class PointScanner(BaseScanner):
         self.output_callback("=" * 60)
         self.output_callback("\n✅ [Point-Scan] Investigation concluded successfully.")
 
-        return None # self.collect_analyze_data(analysis_result, json_report_data)
+        return self.collect_analyze_data(analysis_result, json_report_data)
 
     def collect_analyze_data(self, ai_result, raw_json_data):
         # 1. 마일스톤 좌표 확보
         start_node = self.milestones[self.milestone_start_index]
         end_node = self.milestones[self.milestone_end_index]
+        total_delay_ms = self.milestones[self.milestone_end_index]['delta_ms'] -self.milestones[self.milestone_start_index]['delta_ms']
 
         # 2. AI 리포트에서 단일 타겟 파싱 (Regex)
         pattern = re.compile(
-            r"- Case:\s*(?P<case_id>\S+)\n"
-            r"- Target-Id:\s*(?P<target_id>\d+)\n"
-            r"- Duration:\s*(?P<duration>[\d.]+)ms"
+            r"""
+            -?\s*[Cc]ase:\s*(?P<case_id>[^(\r\n]+).*?[\r\n]+      
+            -?\s*Target-Id:\s*(?P<target_id>\d+).*?[\r\n]+       
+            -?\s*Duration:\s*(?P<duration>[\d.]+)\s*ms.*?[\r\n]* 
+            """, 
+            re.VERBOSE | re.IGNORECASE | re.MULTILINE
         )
         
         match = pattern.search(ai_result)
@@ -130,9 +134,10 @@ class PointScanner(BaseScanner):
             return None
 
         data = match.groupdict()
+        root_target_id = int(data["target_id"])
         target_info = {
             "case_id": data["case_id"],
-            "target_id": int(data["target_id"]),
+            "target_id": root_target_id,
             "duration_ms": float(data["duration"])
         }
 
@@ -170,7 +175,10 @@ class PointScanner(BaseScanner):
                 "start_name": start_node['name'],
                 "end_name": end_node['name'],
                 "start_ts_ns": start_node['ts_s'], 
-                "end_ts_ns": end_node['ts_s']
+                "end_ts_ns": end_node['ts_s'],
+                "start_index": self.milestone_start_index,
+                "end_index": self.milestone_end_index,
+                "total_delay_ms": total_delay_ms
             },
             "target_data": target_info,
             "report_data": ai_result,
