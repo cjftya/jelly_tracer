@@ -37,8 +37,8 @@ class InsightScanner(BaseScanner):
 
         try:
             # 2. 2차 심층 데이터 추출 (SQL Drilling)
-            # 수정된 Delegate는 collected_data를 직접 받아 25/20/10 데이터를 추출합니다.
-            self.output_callback("🔬 Drilling into trace layers (Stacks, Binder, Locks)...")
+            # 수정된 Delegate는 collected_data를 직접 받아 데이터를 추출합니다.
+            self.output_callback("🔬 Drilling into trace layers ...")
             deep_dive_evidence = self.data_provider.fetch_deep_dive_package(self.collected_data)
 
             if not deep_dive_evidence:

@@ -118,35 +118,42 @@ class PointScanDataDelegate:
 
                 final_milestones.append({
                     "name": name,
-                    "ts_n": ms_n[name],
-                    "ts_s": ms_s[name],
+                    "ts_n": ms_n[name],  # Normal 트레이스에서 그 사건이 터진 시각
+                    "ts_s": ms_s[name],  # Slow 트레이스에서 그 사건이 터진 시각
                     "delta_ms": round(delta_ms, 2),  # [핵심] 누적 지연 시간
                     "elapsed_ms_s": round(elapsed_s, 2) # Slow 기준 진행 시간 (UI 표시용)
                 })
 
         if self.output_callback:
-            self.output_callback("\n🔍 [Recommended Start-End Points]", True)
-            self.output_callback("=" * 45, True)
-            
+            self.output_callback("\n🔍 [분석 구간 타임라인(Slow 기준)]", True)
             prev_delta = 0
             for m in final_milestones:
-                curr_delta = m['delta_ms']
-                step_delay = curr_delta - prev_delta  # 이번 구간에서 늘어난 시간
+                elapsed = m['elapsed_ms_s']   # 현재 앱 실행 후 경과 시간
+                curr_delta = m['delta_ms']     # 현재까지의 누적 지연
+                step_delay = curr_delta - prev_delta  # 이전 지점 대비 추가된 지연
                 
-                # 30ms 이상 늘어난 구간은 바로 눈에 띄게 표시
+                # 1. 상태 메시지 및 마크 결정 (UX 최적화)
                 if step_delay >= 30:
-                    mark = "🔴 [Focus]"
-                elif step_delay > 0:
-                    mark = f"(+{step_delay:>5.1f}ms ↑)"
+                    # 30ms 이상은 '집중 분석' 대상으로 분류
+                    status = f"🔴 (정상 대비 +{step_delay:>5.1f}ms 지연 증가(이상) ↑)"
+                elif step_delay > 5:
+                    # 미세한 지연
+                    status = f"⚠️ (정상 대비 +{step_delay:>5.1f}ms 지연 증가 ↑)"
+                elif step_delay <= -5:
+                    # 오히려 빨라진 경우 (최적화 구간)
+                    status = f"✅ (정상 대비 {abs(step_delay):>5.1f}ms 단축!)"
                 else:
-                    mark = ""
+                    # 차이가 거의 없는 경우
+                    status = "(정상 수준)"
 
-                msg = f"📍 {m['name']:<18} : {curr_delta:>7.1f}ms {mark}"
+                # 2. 첫 지점은 기준점으로 표시
+                if elapsed == 0:
+                    status = "(분석 기준점)"
+
+                # 3. 최종 출력 형식
+                msg = f"📍 {m['name']:<18} : {elapsed:>8.1f}ms | {status}"
                 self.output_callback(msg, True)
-                
                 prev_delta = curr_delta
-
-            self.output_callback("=" * 45, True)
         return final_milestones
 
     def identify_targets(self):

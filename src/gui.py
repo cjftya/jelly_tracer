@@ -20,7 +20,11 @@ class ConsoleRedirector:
         if text:
             self.callback(text)
             if self.original_stdout:
-                self.original_stdout.write(text)
+                try:
+                    self.original_stdout.write(text)
+                except UnicodeEncodeError:
+                    # Fallback for systems that don't support certain emojis in terminal (like Windows CP949)
+                    self.original_stdout.write(text.encode('ascii', 'replace').decode('ascii'))
 
     def flush(self):
         if self.original_stdout:
@@ -95,7 +99,7 @@ class TraceGui(ctk.CTk):
     def __init__(self):
         super().__init__()
         self.title("Trace Analyzer")
-        self.geometry("1100x700")
+        self.geometry("1400x800")
         self.protocol("WM_DELETE_WINDOW", self._on_close)
 
         # Output Redirection (Redirect print() to System Log & Terminal)
@@ -118,7 +122,7 @@ class TraceGui(ctk.CTk):
         self._build_ui()
 
         # 프로그램 시작 시 AI 엔진 및 리소스 매니저 초기화 (딱 한 번)
-        if self.status_label:
+        if hasattr(self, 'status_label'):
             self.status_label.configure(text="⚙️ Initializing System...")
         threading.Thread(target=self._initialize_executor, daemon=True).start()
 
@@ -158,7 +162,7 @@ class TraceGui(ctk.CTk):
         self.settings_label = ctk.CTkLabel(
             self.sidebar_frame,
             text="CONFIGURATION",
-            font=ctk.CTkFont(size=12, weight="bold"),
+            font=ctk.CTkFont(family="Segoe UI Emoji", size=12, weight="bold"),
             text_color="#D0D0D0",
             anchor="w",
         )
@@ -177,7 +181,7 @@ class TraceGui(ctk.CTk):
         self.model_label = ctk.CTkLabel(
             self.sidebar_frame,
             text="AI Model",
-            font=ctk.CTkFont(size=11, weight="bold"),
+            font=ctk.CTkFont(family="Segoe UI Emoji", size=11, weight="bold"),
             text_color="#D0D0D0",
             anchor="w",
         )
@@ -210,7 +214,7 @@ class TraceGui(ctk.CTk):
         self.range_label = ctk.CTkLabel(
             self.sidebar_frame,
             text="SCAN RANGE",
-            font=ctk.CTkFont(size=11, weight="bold"),
+            font=ctk.CTkFont(family="Segoe UI Emoji", size=11, weight="bold"),
             text_color="#D0D0D0",
             anchor="w",
         )
@@ -231,7 +235,7 @@ class TraceGui(ctk.CTk):
         self.start_slider.set(0)
         self.start_slider.grid(row=0, column=0, sticky="ew", pady=(5, 0))
         self.start_val_label = ctk.CTkLabel(
-            self.range_frame, text="Start: -", font=ctk.CTkFont(size=11), text_color="#CCCCCC", anchor="w"
+            self.range_frame, text="Start: -", font=ctk.CTkFont(family="Segoe UI Emoji", size=11), text_color="#CCCCCC", anchor="w"
         )
         self.start_val_label.grid(row=1, column=0, sticky="ew", pady=(0, 5))
 
@@ -246,7 +250,7 @@ class TraceGui(ctk.CTk):
         self.end_slider.set(100)
         self.end_slider.grid(row=2, column=0, sticky="ew", pady=(5, 0))
         self.end_val_label = ctk.CTkLabel(
-            self.range_frame, text="End: -", font=ctk.CTkFont(size=11), text_color="#CCCCCC", anchor="w"
+            self.range_frame, text="End: -", font=ctk.CTkFont(family="Segoe UI Emoji", size=11), text_color="#CCCCCC", anchor="w"
         )
         self.end_val_label.grid(row=3, column=0, sticky="ew")
 
@@ -254,7 +258,7 @@ class TraceGui(ctk.CTk):
         self.path_label = ctk.CTkLabel(
             self.sidebar_frame,
             text="RESOURCES",
-            font=ctk.CTkFont(size=12, weight="bold"),
+            font=ctk.CTkFont(family="Segoe UI Emoji", size=12, weight="bold"),
             text_color="#D0D0D0",
             anchor="w",
         )
@@ -308,9 +312,7 @@ class TraceGui(ctk.CTk):
         self.main_container.grid_rowconfigure(3, weight=1)  # Console row should expand
         self.main_container.grid_rowconfigure(0, weight=0)
         self.main_container.grid_rowconfigure(1, weight=0)
-        self.main_container.grid_rowconfigure(
-            2, weight=0
-        )  # Status row should NOT expand
+        self.main_container.grid_rowconfigure(2, weight=0)
 
         # Header with Run Button
         self.header_frame = ctk.CTkFrame(self.main_container, fg_color="transparent")
@@ -320,7 +322,7 @@ class TraceGui(ctk.CTk):
         self.status_label = ctk.CTkLabel(
             self.header_frame,
             text="💤 System Standby",
-            font=ctk.CTkFont(size=24, weight="bold"),
+            font=ctk.CTkFont(family="Segoe UI Emoji", size=24, weight="bold"),
         )
         self.status_label.grid(row=0, column=0, sticky="w")
 
@@ -416,7 +418,7 @@ class TraceGui(ctk.CTk):
 
         self.text_edit = ctk.CTkTextbox(
             self.left_pane,
-            font=("Segoe UI", self.console_font_size),
+            font=("Segoe UI Emoji", self.console_font_size),
             fg_color="#0F0F0F",
             text_color="#CCCCCC",
             border_width=1,
@@ -446,7 +448,7 @@ class TraceGui(ctk.CTk):
 
         self.system_edit = ctk.CTkTextbox(
             self.right_pane,
-            font=("Segoe UI", self.console_font_size),
+            font=("Segoe UI Emoji", self.console_font_size),
             fg_color="#0F0F0F",
             text_color="#CCCCCC",
             border_width=1,
@@ -478,7 +480,7 @@ class TraceGui(ctk.CTk):
             self.console_font_size = max(self.console_font_size - 1, 6)
 
         # Apply to both
-        new_font = ("Segoe UI", self.console_font_size)
+        new_font = ("Segoe UI Emoji", self.console_font_size)
         self.text_edit.configure(font=new_font)
         self.system_edit.configure(font=new_font)
         return "break"  # Prevents default scrolling behavior if Ctrl is held
@@ -490,7 +492,6 @@ class TraceGui(ctk.CTk):
             self.paned_window.sash_place(0, width // 2, 0)
 
     def _choose_path(self, entry_widget: ctk.CTkEntry):
-
         path = filedialog.askopenfilename(
             title="Select trace file", filetypes=[("All Files", "*")]
         )
@@ -599,12 +600,14 @@ class TraceGui(ctk.CTk):
         self.slow_edit.configure(state="disabled")
         self.btn_s.configure(state="disabled")
 
-        self.text_edit.configure(state="normal")
-        self.text_edit.delete("1.0", "end")
-        self.text_edit.configure(state="disabled")
-        self.system_edit.configure(state="normal")
-        self.system_edit.delete("1.0", "end")
-        self.system_edit.configure(state="disabled")
+        # Preserve existing logs and add a separator if not empty
+        for widget, title in [(self.text_edit, "AI ANALYSIS SESSION"), (self.system_edit, "SYSTEM LOG SESSION")]:
+            widget.configure(state="normal")
+            if widget.get("1.0", "end-1c").strip():
+                separator = f"\n\n{'='*15} {title} ({time.strftime('%H:%M:%S')}) {'='*15}\n\n"
+                widget.insert("end", separator)
+            widget.configure(state="disabled")
+
         self.realtime_status.configure(text="")  # Clear status on new run
 
         self.thread = ExecutorThread(
@@ -651,13 +654,24 @@ class TraceGui(ctk.CTk):
         widget.configure(state="disabled")
 
     def _on_finished(self, results: list):
-        self.after(
-            0,
-            lambda: [
-                self.status_label.configure(text="🏁 Analysis Complete"),
-                messagebox.showinfo("Done", "Execution finished. The application must be restarted for a new run."),
-            ],
-        )
+        def finalize():
+            self.status_label.configure(text="🏁 Analysis Complete")
+            
+            # Re-enable UI controls to allow multiple runs
+            self.run_button.configure(state="normal")
+            self.btn_load_data.configure(state="normal")
+            self.package_edit.configure(state="normal")
+            self.model_combo.configure(state="normal")
+            self.start_slider.configure(state="normal")
+            self.end_slider.configure(state="normal")
+            self.normal_edit.configure(state="normal")
+            self.btn_n.configure(state="normal")
+            self.slow_edit.configure(state="normal")
+            self.btn_s.configure(state="normal")
+            
+            messagebox.showinfo("Done", "Analysis finished. Logs have been preserved. You can run another analysis or load new data.")
+
+        self.after(0, finalize)
 
     def _update_token_usage(self, used: int, total: int):
         pct = int(used / total * 100) if total > 0 else 0

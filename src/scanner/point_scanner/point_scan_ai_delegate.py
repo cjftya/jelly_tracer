@@ -29,7 +29,7 @@ f"Based on the data above, execute the defined 'Analysis Logic' and select the s
 
         # 2. Ollama 요청 (R1 모델의 추론 특성 반영)
         response = self.ollama_manager.request(
-            contents, 
+            context=contents, 
             options=self.ollama_manager.getL1Option(),
             chunk_callback=self._chunk_callback
         )
@@ -77,7 +77,7 @@ f"Based on the data above, execute the defined 'Analysis Logic' and select the s
             {"role": "user", "content": "Why is the UI slow? in android xml, better compose?"}
         ]
         response = self.ollama_manager.request(
-            contents, 
+            contents=contents, 
             options=self.ollama_manager.getL1Option(),
             chunk_callback=self._chunk_callback
         )

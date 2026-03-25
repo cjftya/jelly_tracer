@@ -12,8 +12,10 @@ class OllamaManager:
         self.__process = None 
         self.os_type = platform.system()
         self.local_url = "127.0.0.1"
-        self.test_url = "192.168.45.211"
+        self.test_url = "192.168.45.150"
         self.base_url = f"http://{self.test_url}:11434"
+        self.model_names = []
+        self.__model_name = None
         
         self.__default_options = {
             "num_ctx": 24576,
@@ -21,48 +23,50 @@ class OllamaManager:
             "top_p": 0.9,
             "repeat_penalty": 1.1,
             "num_predict": 2048,
-            "mirostat": 0,
             "low_vram": True
         }
 
     def getL1Option(self):
         return {
             "num_ctx": 16384,
-            "temperature": 0.1,
+            "temperature": 0,
             "top_p": 0.8,
             "repeat_penalty": 1.05,
             "num_predict": 4096,
-            "mirostat": 0,
             "low_vram": True
         }
 
     def getL2Phase1Option(self):
         return {
             "num_ctx": 16384,
-            "temperature": 0.1,
-            "top_p": 0.7,
-            "repeat_penalty": 1.1,
+            "temperature": 0.05,
+            "top_p": 0.8,
+            "repeat_penalty": 1.05,
             "num_predict": 2048,
-            "mirostat": 0,
             "low_vram": True
         }
 
     def getL2Phase2Option(self):
         return {
             "num_ctx": 16384,
-            "temperature": 0.1,
-            "top_p": 0.8,
-            "repeat_penalty": 1.2,
-            "num_predict": 4096,
-            "mirostat": 0,
+            "temperature": 0,
+            "top_p": 0.9,
+            "repeat_penalty": 1.05,
+            "num_predict": 1024,
             "low_vram": True
         }
 
+    def get_report_only_model(self):
+        for model_name in self.model_names:
+            if "qwen2.5" in model_name:
+                return model_name
+        return "qwen2.5"
 
     def get_installed_models(self):
         client = Client(host=self.base_url)
         response = client.list()
-        return [model.model for model in response.models]
+        self.model_names = [model.model for model in response.models]
+        return self.model_names
 
     def set_model_name(self, model_name):
         self.__model_name = model_name
@@ -70,14 +74,14 @@ class OllamaManager:
     def get_context_size(self):
         return self.getL1Option().get("num_ctx", 0)
 
-    def request(self, context, options=None, format=None, chunk_callback=None):
+    def request(self, context, model=None, options=None, format=None, chunk_callback=None):
         client = Client(host=self.base_url)
         op = self.__default_options.copy()
         if options:
             op = options
 
         response_stream = client.chat(
-            model=self.__model_name,
+            model=model if model else self.__model_name,
             messages=context,
             format=format,
             options=op,

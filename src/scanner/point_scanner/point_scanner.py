@@ -83,6 +83,8 @@ class PointScanner(BaseScanner):
             "tree_data": json.dumps(clean_json_data, separators=(',', ':'), ensure_ascii=False)
         }
 
+        print(ai_context)
+
         # AI 분석 실행 및 리포트 수신
         analysis_result = self.ai_analyst.request_analysis(ai_context)
 
@@ -108,7 +110,7 @@ class PointScanner(BaseScanner):
         self.output_callback("=" * 60)
         self.output_callback("\n✅ [Point-Scan] Investigation concluded successfully.")
 
-        return self.collect_analyze_data(analysis_result, json_report_data)
+        return None # self.collect_analyze_data(analysis_result, json_report_data)
 
     def collect_analyze_data(self, ai_result, raw_json_data):
         # 1. 마일스톤 좌표 확보
