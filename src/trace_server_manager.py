@@ -15,7 +15,7 @@ class TraceServerManager:
         self.trace_n = trace_n
         self.trace_s = trace_s
 
-        print("🚀 Trace 분석 환경 설정중...")
+        print("🚀 Configuring Trace Analysis Environment...")
         configs = [(9001, self.trace_n), (9002, self.trace_s)]
 
         for port, trace in configs:
@@ -37,11 +37,11 @@ class TraceServerManager:
             self.procs.append(proc)
 
         time.sleep(5)
-        print("✅ 완료")
+        print("✅ Complete")
 
     def stop_servers(self):
         if self.procs:
-            print(f"🚿 Trace 세션 정리중... {len(self.procs)}개")
+            print(f"🚿 Cleaning up Trace Sessions... {len(self.procs)} processes")
             for proc in self.procs:
                 proc.terminate()
             
@@ -57,5 +57,4 @@ class TraceServerManager:
                     capture_output=True,
                     text=True
                 )
-            
-            print("✅ 완료")
+            print("✅ Complete")

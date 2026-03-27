@@ -125,7 +125,7 @@ class PointScanDataDelegate:
                 })
 
         if self.output_callback:
-            self.output_callback("\n🔍 [분석 구간 타임라인(Slow 기준)]", True)
+            self.output_callback("\n🔍 [Analysis Interval Timeline (vs. Slow Case Baseline)]\n")
             prev_delta = 0
             for m in final_milestones:
                 elapsed = m['elapsed_ms_s']   # 현재 앱 실행 후 경과 시간
@@ -135,24 +135,24 @@ class PointScanDataDelegate:
                 # 1. 상태 메시지 및 마크 결정 (UX 최적화)
                 if step_delay >= 30:
                     # 30ms 이상은 '집중 분석' 대상으로 분류
-                    status = f"🔴 (정상 대비 +{step_delay:>5.1f}ms 지연 증가(이상) ↑)"
+                    status = f"🔴 (+{step_delay:>5.1f}ms Critical Delay Spike ↑)"
                 elif step_delay > 5:
                     # 미세한 지연
-                    status = f"⚠️ (정상 대비 +{step_delay:>5.1f}ms 지연 증가 ↑)"
+                    status = f"⚠️ (+{step_delay:>5.1f}ms Delay Increase ↑)"
                 elif step_delay <= -5:
                     # 오히려 빨라진 경우 (최적화 구간)
-                    status = f"✅ (정상 대비 {abs(step_delay):>5.1f}ms 단축!)"
+                    status = f"✅ ({abs(step_delay):>5.1f}ms Faster / Improved!)"
                 else:
                     # 차이가 거의 없는 경우
-                    status = "(정상 수준)"
+                    status = "(Normal Range)"
 
                 # 2. 첫 지점은 기준점으로 표시
                 if elapsed == 0:
-                    status = "(분석 기준점)"
+                    status = "(Analysis Baseline)"
 
                 # 3. 최종 출력 형식
                 msg = f"📍 {m['name']:<18} : {elapsed:>8.1f}ms | {status}"
-                self.output_callback(msg, True)
+                self.output_callback(msg)
                 prev_delta = curr_delta
         return final_milestones
 
@@ -195,7 +195,7 @@ class PointScanDataDelegate:
             status = "⚠️ [Moderate Confidence]"
         else:
             # 유사도가 너무 낮으면 비교 자체가 무의미하므로 수사를 중단합니다.
-            self._abort_investigation("Structural Inconsistency", f"두 트레이스의 구조적 유사도가 너무 낮습니다 ({similarity:.1%}).")
+            self._abort_investigation("Structural Inconsistency", f"⚠️ ALERT: Structural similarity is too low for direct correlation. ({similarity:.1%}).")
             return None, None, None
 
         self.output_callback(f"{status} Baseline Matched. (Similarity: {similarity:.1%})", True)
@@ -205,7 +205,7 @@ class PointScanDataDelegate:
         if not self.utid_s or not self.utid_n:
             return {"error": "Target threads not identified."}
 
-        self.output_callback("🚀 [JSON Engine] 독립된 최악의 지연 구간 2곳을 추출 중...", True)
+        self.output_callback("🚀 [JSON Engine] Isolating top 2 independent critical bottleneck segments...", True)
 
         start_ts_n, end_ts_n = start_m['ts_n'], end_m['ts_n']
         start_ts_s, end_ts_s = start_m['ts_s'], end_m['ts_s']
@@ -264,10 +264,7 @@ class PointScanDataDelegate:
         return node_data
 
     def _find_worst_slices(self, utid_n, utid_s, start_ts_n, end_ts_n, start_ts_s, end_ts_s, limit=2):
-        """
-        [NEW] 시간 범위 포함 관계를 전수 조사하여 독립적인 Worst 2를 추출합니다.
-        """
-        self.output_callback("🛰️ [Deep Scan] 모든 계층에서 중복되지 않는 지연 구간 탐색...", True)
+        self.output_callback("🛰️ [Deep Scan] Identifying unique, non-overlapping delay clusters across all layers...", True)
         
         # 1. Slow 트레이스의 타겟 구간 내 모든 슬라이스 수집
         query_s = f"""

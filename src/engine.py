@@ -28,8 +28,10 @@ class Engine:
     def stop(self):
         if self.ollamaManager:
             self.ollamaManager.stop_engine()
+            self.ollamaManager = None
         if self.server_manager:
             self.server_manager.stop_servers()
+            self.server_manager = None
         #=====================
         self.fusion_core_engine.stop()
 

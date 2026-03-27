@@ -1,6 +1,7 @@
 from scanner.base_scanner import BaseScanner
 from scanner.insight_scanner.insight_scan_data_delegate import InsightScanDataDelegate
 from scanner.insight_scanner.insight_scan_ai_delegate import InsightScanAIDelegate
+from log import Logger
 
 class InsightScanner(BaseScanner):
     def __init__(self):
@@ -30,49 +31,37 @@ class InsightScanner(BaseScanner):
         
         self.output_callback(f"🚀 [Insight-Scan] Investigation Started: {self.target_package}")
 
-        # 1. 마스터 데이터 존재 확인
         if not self.collected_data:
             self.output_callback("⚠️ [Error] Master data (collected_data) is missing. Cannot proceed.", True)
             return
 
         try:
-            # 2. 2차 심층 데이터 추출 (SQL Drilling)
-            # 수정된 Delegate는 collected_data를 직접 받아 데이터를 추출합니다.
             self.output_callback("🔬 Drilling into trace layers ...")
             deep_dive_evidences = self.data_provider.fetch_deep_dive_package(self.collected_data)
             deep_dive_evidence = deep_dive_evidences[0]
-            for_report = deep_dive_evidences[1]
+            full_tree_evidence = deep_dive_evidences[1]
 
             if not deep_dive_evidence:
                 self.output_callback("⚠️ [Error] Deep dive evidence is missing. Cannot proceed.", True)
                 return
 
-            # 3. 최종 AI 분석용 마스터 브리핑 패키지 조립 (JSON 통합)
-            # 1차의 컨텍스트와 2차의 물리적 증거를 결합합니다.
-            master_brief = {
-                "analysis_context": self.collected_data, 
-                "deep_dive_evidence": deep_dive_evidence,
-                "for_report": for_report
-            }
+            summary_context = self.data_provider.summarize_investigation(self.target_package, self.collected_data['milestones'],
+                                                        deep_dive_evidence, full_tree_evidence)
+          
+            raw_res = self.ai_analyst.request_analysis(summary_context)
 
-            # 4. 2단계 AI 추론 엔진 가동 (Phase 1: 탐사 -> Phase 2: 검증)
-            self.output_callback("🧠 AI Analyst is synthesizing deep insights...")
-            verdicts = self.ai_analyst.execute_double_scan(master_brief)
-            final_verdict = verdicts[0]
-            target_node = verdicts[1]
+            Logger.log(f"InsightScan response\n{raw_res}")
 
-            # # 5. 최종 결과 출력 및 수사 종료
-            self.build_final_report(
-                ai_summary_report=final_verdict,
-                target_node=target_node,
-                tree_data=for_report
-            )
+            thinking_text = raw_res.get('thinking', 'No thinking content available.')
+            self.output_callback(f"\n🧠 [AI Thinking...]\n{thinking_text}\n")
 
+            final_report = self.generate_final_report(summary_context, raw_res)
+            self.output_callback(final_report)
         except Exception as e:
             self.output_callback(f"❌ [Critical Error] Insight Scan failed: {str(e)}", True)
 
     def stop(self):
-        pass
+        super().stop()
 
     def format_tree_visual(self, node, prefix="", is_last=True, is_root=True, target_id=None):
         # 1. 트리 마커 설정
@@ -86,29 +75,20 @@ class InsightScanner(BaseScanner):
         # 타겟일 경우 '▶' 표시와 볼드체 느낌의 강조
         current_marker = f"▶ {marker}" if is_target else f"  {marker}"
         
-        name = node.get('name', 'Unknown')
-        # 이름이 너무 길면 잘림 방지 및 정렬을 위해 30자로 제한
-        display_name = (name[:27] + '..') if len(name) > 30 else name
+        display_name = node.get('name', 'Unknown')
         
         delta = node.get('delta_time', 0)
         wait = node.get('wait_time', 0)
-        self_time = node.get('self_time', 0) # 수사관님을 위한 Self Time 추가
+        self_time = node.get('self_time', 0)
+        ghost_gap = node.get('ghost_gap', 0)
         
-        # 3. 위험 플래그 시각화
-        flags = []
-        if node.get('is_native_cliff'): flags.append("🪨[N]")
-        if node.get('is_resource_contention'): flags.append("⚠️[R]")
-        if node.get('has_ghost_gap'): flags.append("👻[G]")
-        flag_str = " ".join(flags)
-
         # 4. 한 줄 구성 (컬럼 간격 최적화)
-        # 이름(30) | ID(8) | Delta(8) | Wait(8) | Self(8) | Flags
         line = (f"{prefix}{current_marker}{display_name:<30} "
                 f"(ID: {node_id:<7}) | "
-                f"{delta:>7.1f}ms | "
+                f"D: {delta:>7.1f}ms | "
                 f"W: {wait:>6.1f}ms | "
-                f"S: {self_time:>6.1f}ms "
-                f"{flag_str}\n")
+                f"S: {self_time:>6.1f}ms | "
+                f"G: {ghost_gap:>6.1f}ms\n")
 
         # 5. 자식 노드 재귀 호출
         children = node.get('children', [])
@@ -121,57 +101,64 @@ class InsightScanner(BaseScanner):
             
         return result
 
-    def build_final_report(self, ai_summary_report, target_node, tree_data):
-        # 1. 기본 데이터 추출
-        milestones = self.collected_data['milestones']
-        start_milestone_name = milestones['start_name']
-        end_milestone_name = milestones['end_name']
-        milestone_delay = milestones["total_delay_ms"]
+    def generate_final_report(self, summary_context, ai_res):
+        # 1. 메타데이터 및 지연 시간 추출
+        meta = summary_context.get('metadata', {})
+        verdict = summary_context.get('final_verdict', {})
+        ratios = verdict.get('responsibility_ratio', {'app': 0, 'system': 0})
+        
+        # 지연된 시간
+        milestone_delay = meta.get('total_delay_delta_ms', 0) 
+        
+        # 타임라인 분리
+        range_str = meta.get('milestone_range', 'Unknown ~ Unknown')
+        start_name, end_name = range_str.split(' ~ ') if ' ~ ' in range_str else (range_str, "")
 
-        target_data = self.collected_data['target_data']
-        target_id = target_data['target_id']
-        target_duration = target_data['duration_ms']
-        target_name = target_node.get('name', 'N/A') if target_node else "N/A"
+        # 노말라이즈된 값 (0~100%)
+        app_ratio = ratios.get('app', 0)
+        sys_ratio = ratios.get('system', 0)
+        app_blocks = round(app_ratio / 10)
+        sys_blocks = round(sys_ratio / 10)
 
-        # 2. 전수 조사 데이터 생성
-        table = self.format_tree_visual(node=tree_data)
+        # 2. 프로그레스 바 생성
+        progress_bar = (
+            f"[App {'█' * app_blocks}{'░' * (10 - app_blocks)}┃"
+            f"{'█' * sys_blocks}{'░' * (10 - sys_blocks)} Sys]"
+        )
 
-        # 3. 시각적 지표 계산 (프로그레스 바)
-        impact_percent = (target_duration / milestone_delay) * 100
-        bar_width = 20
-        filled = int((impact_percent / 100) * bar_width)
-        progress_bar = f"[{'█' * filled}{'░' * (bar_width - filled)}] {impact_percent:.1f}%"
-
-        # 4. 심각도 아이콘 및 코멘트 선정
-        if impact_percent >= 80:
-            icon, status = "🔴", "CRITICAL: 대부분의 지연을 차지하는 독보적 원인"
-        elif impact_percent >= 50:
-            icon, status = "🟠", "WARNING: 상당 부분을 차지하는 주요 개선 필요 지점"
+        # 3. 지연 시간에 따른 상태 및 아이콘 자동 결정
+        if milestone_delay >= 50:
+            icon, status = "🚨", "CRITICAL SYSTEMIC BOTTLENECK"
+        elif milestone_delay >= 20:
+            icon, status = "⚠️", "WARNING: PERFORMANCE DEGRADATION"
         else:
-            icon, status = "🟡", "NOTICE: 주요 병목 중 하나이며 하위 노드 검토 필요"
+            icon, status = "✅", "NORMAL PERFORMANCE RANGE"
 
-        # 5. AI 리포트 들여쓰기 정렬 (가독성 향상)
-        indented_ai_report = ai_summary_report.replace('\n', '\n  ')
+        # 4. AI 보고서 들여쓰기 처리
+        analysis_text = ai_res.get('analysis', 'No analysis content available.')
+        indented_ai_report = "\n".join([f"  {line}" for line in analysis_text.split('\n')])
 
-        # 6. 디자인이 적용된 최종 양식 구성
-        final_report_text = f"""
-┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
-┃  🚀 SYSTEM PERFORMANCE FORENSIC REPORT                     ┃
-┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
-  📍 Range  : {start_milestone_name}  ➔  {end_milestone_name}
-  ⏱️ Total  : {milestone_delay:,.1f} ms
-  🎯 Target : {target_name} (ID: {target_id})
-  📊 Impact : {progress_bar}
-  {icon} Status : {status}
+        # 5. 트리 비주얼 생성
+        target_id = ai_res.get('target_id', 0)
+        tree_table = self.format_tree_visual(summary_context.get('evidence_room_full_tree', {}), target_id=target_id)
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  🔍 [AI ROOT CAUSE ANALYSIS]
-  {indented_ai_report}
+        # 6. 최종 템플릿 조립
+        report = f"""
+───────────────────────────────────────
+📑 [ PERFORMANCE ANALYSIS REPORT ]
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  📂 [FULL TRACE STACK]
-{table}
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ℹ️ [ CASE METADATA ]
+  • 🗓️ Timeline : {start_name} ➔ {end_name}
+  • ⏱️ Duration : {milestone_delay:,.1f} ms (Delta)
+  • 🎯 Target   : {meta.get('app_name')} (ID: {target_id})
+  • ⚡ Impact   : {progress_bar}
+  • 🚥 Status   : {icon} {status}
+
+🧠 [ AI ROOT CAUSE ANALYSIS ]
+{indented_ai_report}
+
+📂 [ CRITICAL TRACE STACK ]
+{tree_table}
+───────────────────────────────────────
 """
-        # 결과 출력
-        self.output_callback("\n" + final_report_text)
+        return report

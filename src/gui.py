@@ -634,7 +634,6 @@ class TraceGui(ctk.CTk):
         # Disable button and show loading status
         self.btn_load_data.configure(state="disabled")
         self.status_label.configure(text="⏳ Loading Data...")
-        print("System: Loading trace data. Please wait...")
 
         def load_task():
             try:

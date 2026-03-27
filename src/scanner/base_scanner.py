@@ -9,6 +9,10 @@ class BaseScanner:
         self.output_callback = output_callback
         self.ollama_manager = ollama_manager
 
+    def stop(self):
+        self.ollama_manager = None
+        self.output_callback = None
+
     def run(self, output_callback=None):
         if output_callback:
             self.output_callback = output_callback

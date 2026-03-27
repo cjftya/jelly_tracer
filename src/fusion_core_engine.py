@@ -1,3 +1,4 @@
+import gc
 from scanner.base_scanner import BaseScanner
 from scanner.point_scanner.point_scanner import PointScanner
 from scanner.insight_scanner.insight_scanner import InsightScanner
@@ -17,6 +18,7 @@ class FusionCoreEngine:
         self.insight_scanner = InsightScanner()
 
         self.common_api = None
+
     def start(self, ollama_manager, output_callback, range_callback=None):
         self.output_callback = output_callback
         self.ollama_manager = ollama_manager
@@ -49,7 +51,11 @@ class FusionCoreEngine:
         final_result = self.insight_scanner.run(output_callback=output_callback)
         
     def stop(self):
-        pass
+        for scanner in [self.point_scanner, self.insight_scanner]:
+            scanner.stop()
+        if self.common_api:
+            self.common_api.release()
+        gc.collect()
 
     def _testData(self):
         return {
