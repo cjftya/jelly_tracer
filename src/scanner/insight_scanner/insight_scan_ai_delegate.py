@@ -1,12 +1,12 @@
 import re
 import json
 from scanner.insight_scanner.insight_scan_prompt_values import InsightScanPromptValues
-from ollama_manager import OllamaManager
+from llm_requester import LLMRequester
 
 class InsightScanAIDelegate:
-    def __init__(self, ollama_manager: OllamaManager, output_callback):
+    def __init__(self, llm_requester: LLMRequester, output_callback):
         self.output_callback = output_callback
-        self.ollama_manager = ollama_manager
+        self.llm_requester = llm_requester
 
     def request_analysis(self, context):
         try:
@@ -17,10 +17,10 @@ class InsightScanAIDelegate:
                 {"role": "user", "content": string_context}
             ]
 
-            raw_res = self.ollama_manager.request(
+            raw_res = self.llm_requester.request(
                 context=ai_context,
-                options=self.ollama_manager.getL2Phase1Option(),
-                chunk_callback=lambda chunk: self.ollama_manager.chunk_callback(chunk, self.output_callback)
+                options=self.llm_requester.getInsightScanOption(),
+                chunk_callback=lambda chunk: self.llm_requester.chunk_callback(chunk, self.output_callback)
             )
             total_tokens = raw_res.get("prompt_eval_count", 0) + raw_res.get("eval_count", 0)
             if self.output_callback:
@@ -41,7 +41,7 @@ class InsightScanAIDelegate:
                     thinking_process = "Internal reasoning was not tagged correctly by AI."
                     final_analysis = full_content.strip()
 
-            target_pattern = re.compile(r'Target-?Id[:\s]+(\d+)', re.IGNORECASE)
+            target_pattern = re.compile(r'Target-?ID[:\s]+(\d+)', re.IGNORECASE)
             target_match = target_pattern.search(final_analysis)
             target_id = target_match.group(1) if target_match else 0
 

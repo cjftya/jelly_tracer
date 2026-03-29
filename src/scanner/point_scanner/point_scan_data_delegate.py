@@ -1,33 +1,21 @@
 import pandas as pd
 import numpy as np
 import json
-from common_api import CommonAPI
 
 class PointScanDataDelegate:
     def __init__(self, output_callback):
         self._common_api = None
-        self.utid_n = None  # Normal 트레이스의 타겟 스레드 ID
-        self.utid_s = None  # Slow 트레이스의 타겟 스레드 ID
-        self.ts_n = None    # Normal 트레이스 전체 시간 범위 [start, end]
-        self.ts_s = None    # Slow 트레이스 전체 시간 범위 [start, end]
-        self.target_thread = None
         self.output_callback = output_callback
+        self.milestones_registry = []  # 추출된 공통 마일스톤 저장소
         pd.set_option('future.no_silent_downcasting', True)
 
-    def init(self, common_api, target_package):
-        """두 트레이스 파일을 로드하고 분석을 위한 기초 시간 범위를 설정합니다."""
+    def init(self, common_api):
         self._common_api = common_api
-        
-        # 전체 트레이스의 시작과 끝을 구해야 나중에 스레드 점수를 매길 때 범위를 한정할 수 있습니다.
-        self.ts_n = self.get_global_bounds("normal")
-        self.ts_s = self.get_global_bounds("slow")
-        
-        if not self.ts_n or not self.ts_s:
-            self.output_callback("⚠️ [Warning] Failed to retrieve global trace bounds.", True)
 
     def get_common_milestones(self):
         core_candidates = ['bindApplication', 'activityStart', 'activityResume']
-        def fetch_milestones(mode):
+        
+        def fetch_milestones_by_mode(mode):
             try:
                 tp = self._common_api.get_trace_processor(mode)
                 upid = self._common_api.get_upid(mode)
@@ -38,366 +26,277 @@ class PointScanDataDelegate:
             if tp is None or upid is None:
                 return {}
 
-            # 코어 마일스톤 추출 (프로세스 내 모든 스레드 대상)
-            query = f"""
+            # 1. 코어 마일스톤 쿼리: 프로세스 내 모든 스레드 대상
+            milestone_query = f"""
                 SELECT name, ts 
                 FROM slice 
                 WHERE track_id IN (
                     SELECT id FROM thread_track 
                     WHERE utid IN (SELECT utid FROM thread WHERE upid = {upid})
                 )
-                AND name IN ({','.join([f"'{n}'" for n in core_candidates])})
+                AND name IN ({','.join([f"'{name}'" for name in core_candidates])})
                 ORDER BY ts ASC
             """
-            df = tp.query(query).as_pandas_dataframe()
-            # 이름 중복 시 가장 먼저 나타난(가장 빠른) ts 선택
-            m_dict = {row['name']: row['ts'] for _, row in df.drop_duplicates('name').iterrows()}
+            milestone_df = tp.query(milestone_query).as_pandas_dataframe()
+            # 이름 중복 시 가장 먼저 나타난 타임스탬프 선택
+            milestone_dict = {row['name']: row['ts'] for _, row in milestone_df.drop_duplicates('name').iterrows()}
             
-            # '화면 변화 없음' 지점 찾기 (Visual Idle)
-            base_ts = m_dict.get('activityResume', 0)
-            idle_query = f"""
-                SELECT MAX(ts + dur) as last_ts
+            # 2. VisualComplete (화면 변화 종료 지점) 탐색
+            base_reference_ts = milestone_dict.get('activityResume', 0)
+            visual_idle_query = f"""
+                SELECT MAX(ts + dur) as last_visual_ts
                 FROM slice
                 WHERE track_id IN (
                     SELECT id FROM thread_track 
                     WHERE utid IN (SELECT utid FROM thread WHERE upid = {upid})
                 )
                 AND (name LIKE 'Choreographer%' OR name LIKE 'doFrame%' OR name = 'traversal')
-                AND ts > {base_ts}
+                AND ts > {base_reference_ts}
             """
-            idle_df = tp.query(idle_query).as_pandas_dataframe()
+            visual_df = tp.query(visual_idle_query).as_pandas_dataframe()
             
-            # 결과가 [None]인 경우를 대비한 안전한 추출
-            if not idle_df.empty:
-                val = idle_df['last_ts'].iloc[0]
-                if pd.notnull(val): # None이나 NaN이 아닐 때만 저장
-                    m_dict['VisualComplete'] = int(val)
+            if not visual_df.empty:
+                last_ts_value = visual_df['last_visual_ts'].iloc[0]
+                if pd.notnull(last_ts_value):
+                    milestone_dict['VisualComplete'] = int(last_ts_value)
             
-            return m_dict
+            return milestone_dict
 
-        # 데이터 수집
-        ms_n = fetch_milestones("normal")
-        ms_s = fetch_milestones("slow")
+        # 양측 데이터 수집
+        milestones_normal = fetch_milestones_by_mode("normal")
+        milestones_slow = fetch_milestones_by_mode("slow")
 
-        # 양쪽 공통 마일스톤 추출 (순서 유지)
-        all_possible = core_candidates + ['VisualComplete']
-        common_names = [n for n in all_possible if n in ms_n and n in ms_s]
+        # 공통으로 존재하는 마일스톤 이름 추출
+        potential_names = core_candidates + ['VisualComplete']
+        common_milestone_names = [name for name in potential_names if name in milestones_normal and name in milestones_slow]
 
-        # 결과 판단
-        if not common_names:
+        if not common_milestone_names:
             if self.output_callback:
                 self.output_callback("❌ [Error] No common milestones found between traces.", True)
             return None
 
-        # 누락된 포인트에 대한 지능형 로그
-        expected = set(all_possible)
-        missing = expected - set(common_names)
-        if missing and self.output_callback:
-            if 'VisualComplete' in missing:
-                self.output_callback("ℹ️ [Info] VisualComplete not found. Using last available marker.", True)
-            important_missing = missing - {'VisualComplete'}
-            if important_missing:
-                self.output_callback(f"⚠️ [Warning] Missing core points: {list(important_missing)}", True)
+        # 기준점 설정 (첫 번째 공통 마일스톤)
+        first_common_name = common_milestone_names[0]
+        base_ts_normal = milestones_normal[first_common_name]
+        base_ts_slow = milestones_slow[first_common_name]
 
-        # 가장 첫 번째로 발견된 공통 마일스톤을 기준으로 정렬(Alignment)합니다.
-        first_name = common_names[0]
-        base_n = ms_n[first_name]
-        base_s = ms_s[first_name]
-
-        # 최종 리스트 조립
+        # 최종 마일스톤 리스트 조립 및 지연(Delta) 계산
         final_milestones = []
-        for name in all_possible:
-            if name in ms_n and name in ms_s:
-                # 1. 각 마일스톤이 기준점으로부터 얼마나 걸렸는지 계산 (ns -> ms)
-                elapsed_n = (ms_n[name] - base_n) / 1e6
-                elapsed_s = (ms_s[name] - base_s) / 1e6
+        for name in potential_names:
+            if name in milestones_normal and name in milestones_slow:
+                # 기준점으로부터의 경과 시간 계산 (ns -> ms)
+                elapsed_ms_normal = (milestones_normal[name] - base_ts_normal) / 1e6
+                elapsed_ms_slow = (milestones_slow[name] - base_ts_slow) / 1e6
                 
-                # 2. Normal 대비 Slow의 지연 시간(Delta) 계산
-                # 이 값이 (+)이면 Slow가 그만큼 더 늦게 도달했다는 뜻입니다.
-                delta_ms = elapsed_s - elapsed_n
+                # 누적 지연 시간 (Delta)
+                accumulated_delta_ms = elapsed_ms_slow - elapsed_ms_normal
 
                 final_milestones.append({
                     "name": name,
-                    "ts_n": ms_n[name],  # Normal 트레이스에서 그 사건이 터진 시각
-                    "ts_s": ms_s[name],  # Slow 트레이스에서 그 사건이 터진 시각
-                    "delta_ms": round(delta_ms, 2),  # [핵심] 누적 지연 시간
-                    "elapsed_ms_s": round(elapsed_s, 2) # Slow 기준 진행 시간 (UI 표시용)
+                    "ts_n": milestones_normal[name],
+                    "ts_s": milestones_slow[name],
+                    "delta_ms": round(accumulated_delta_ms, 2),
+                    "elapsed_ms_s": round(elapsed_ms_slow, 2)
                 })
 
+        # 분석 로그 출력 (UX 최적화)
         if self.output_callback:
             self.output_callback("\n🔍 [Analysis Interval Timeline (vs. Slow Case Baseline)]\n")
-            prev_delta = 0
-            for m in final_milestones:
-                elapsed = m['elapsed_ms_s']   # 현재 앱 실행 후 경과 시간
-                curr_delta = m['delta_ms']     # 현재까지의 누적 지연
-                step_delay = curr_delta - prev_delta  # 이전 지점 대비 추가된 지연
+            previous_delta = 0
+            for milestone in final_milestones:
+                current_elapsed = milestone['elapsed_ms_s']
+                current_delta = milestone['delta_ms']
+                interval_delay = current_delta - previous_delta
                 
-                # 1. 상태 메시지 및 마크 결정 (UX 최적화)
-                if step_delay >= 30:
-                    # 30ms 이상은 '집중 분석' 대상으로 분류
-                    status = f"🔴 (+{step_delay:>5.1f}ms Critical Delay Spike ↑)"
-                elif step_delay > 5:
-                    # 미세한 지연
-                    status = f"⚠️ (+{step_delay:>5.1f}ms Delay Increase ↑)"
-                elif step_delay <= -5:
-                    # 오히려 빨라진 경우 (최적화 구간)
-                    status = f"✅ ({abs(step_delay):>5.1f}ms Faster / Improved!)"
+                if interval_delay >= 30:
+                    status_flag = f"🔴 (+{interval_delay:>5.1f}ms Critical Delay Spike ↑)"
+                elif interval_delay > 5:
+                    status_flag = f"⚠️ (+{interval_delay:>5.1f}ms Delay Increase ↑)"
+                elif interval_delay <= -5:
+                    status_flag = f"✅ ({abs(interval_delay):>5.1f}ms Faster / Improved!)"
                 else:
-                    # 차이가 거의 없는 경우
-                    status = "(Normal Range)"
+                    status_flag = "(Normal Range)"
 
-                # 2. 첫 지점은 기준점으로 표시
-                if elapsed == 0:
-                    status = "(Analysis Baseline)"
+                if current_elapsed == 0:
+                    status_flag = "(Analysis Baseline)"
 
-                # 3. 최종 출력 형식
-                msg = f"📍 {m['name']:<18} : {elapsed:>8.1f}ms | {status}"
-                self.output_callback(msg)
-                prev_delta = curr_delta
-        return final_milestones
+                log_message = f"📍 {milestone['name']:<18} : {current_elapsed:>8.1f}ms | {status_flag}"
+                self.output_callback(log_message)
+                previous_delta = current_delta
 
-    def identify_targets(self):
-        self.output_callback("🔍 [Targeting] Identifying primary investigation targets...", True)
+        self.milestones_registry = final_milestones
+        return self.milestones_registry
+
+    def run_point_scan(self, target_package_name, start_milestone_index, end_milestone_index, coverage_target_ratio=0.8):
+        if not self.milestones_registry:
+            self.output_callback("🚨 [Error] Milestones have not been initialized.", True)
+            return None
+
+        # 1. 수사 범위(Time Window) 확정
+        start_milestone_data = self.milestones_registry[start_milestone_index]
+        end_milestone_data = self.milestones_registry[end_milestone_index]
         
-        # Slow 트레이스에서 가장 활발하거나 중요한(Choreographer 등) 스레드 후보 추출
-        res_s = self.get_thread_candidates(self._common_api.tp_s, self._common_api.upid_s, self.ts_s)
+        scan_range_start_ts_slow = start_milestone_data['ts_s']
+        scan_range_end_ts_slow = end_milestone_data['ts_s']
+        scan_range_start_ts_normal = start_milestone_data['ts_n']
+        scan_range_end_ts_normal = end_milestone_data['ts_n']
         
-        if res_s is None or res_s.empty:
-            self.output_callback("🚨 [CRITICAL] No active threads found in SLOW trace.", True)
-            return None, None, None
-
-        # 가장 점수가 높은 스레드를 타겟으로 선정
-        target_row_s = res_s.iloc[0]
-        self.target_thread = target_row_s['thread_name']
-        self.utid_s = int(target_row_s['utid'])
+        total_observed_delay_ms = end_milestone_data['delta_ms'] - start_milestone_data['delta_ms']
         
-        self.output_callback(f"🕵️‍♂️ [Suspect Identified] '{self.target_thread}' (Score: {target_row_s['total_score']:.1f})", True)
+        self.output_callback(f"🔍 [Point-Scan] Investigating {total_observed_delay_ms:.1f}ms delay between {start_milestone_data['name']} and {end_milestone_data['name']}", True)
 
-        # Normal 트레이스에서도 동일한 이름의 스레드를 찾아 대조군(Baseline)으로 삼습니다.
-        res_n = self.get_thread_candidates(self._common_api.tp_n, self._common_api.upid_n, self.ts_n)
-        if res_n is None or res_n.empty:
-            self.output_callback("🚨 [CRITICAL] Package data not found in NORMAL trace.", True)
-            return None, None, None
+        # 2. 패키지 소속 모든 스레드 식별
+        package_thread_map = self._get_threads_by_package(target_package_name)
+        if not package_thread_map:
+            self.output_callback(f"🚨 [Error] No threads found for package: {target_package_name}", True)
+            return None
 
-        match_n = res_n[res_n['thread_name'] == self.target_thread]
-        if match_n.empty:
-            self._abort_investigation("Thread Name Mismatch", f"Target '{self.target_thread}' not found in NORMAL trace.")
-            return None, None, None
+        # 3. 전수 조사: 모든 스레드에서 지연 후보군 수집
+        candidate_incidents = self._collect_delay_candidates_across_threads(
+            package_thread_map, 
+            scan_range_start_ts_slow, scan_range_end_ts_slow,
+            scan_range_start_ts_normal, scan_range_end_ts_normal
+        )
 
-        self.utid_n = int(match_n.iloc[0]['utid'])
+        # 4. 독립적인 핵심 사건 선정 (Greedy Selection)
+        final_incidents = self._select_independent_worst_incidents(
+            candidate_incidents, total_observed_delay_ms, coverage_target_ratio
+        )
+
+        # 5. Ghost Gap(설명되지 않은 공백) 계산
+        captured_delay_sum_ms = sum(inc['delay_delta_ms'] for inc in final_incidents)
+        unexplained_ghost_ms = total_observed_delay_ms - captured_delay_sum_ms
         
-        # 두 스레드의 구조적 유사도(Similarity)를 체크하여 비교 가능한 대상인지 검증합니다.
-        similarity = self.check_thread_similarity(self.utid_n, self.utid_s)
-        
-        if similarity > 0.7:
-            status = "✅ [High Confidence]"
-        elif similarity > 0.35:
-            status = "⚠️ [Moderate Confidence]"
-        else:
-            # 유사도가 너무 낮으면 비교 자체가 무의미하므로 수사를 중단합니다.
-            self._abort_investigation("Structural Inconsistency", f"⚠️ ALERT: Structural similarity is too low for direct correlation. ({similarity:.1%}).")
-            return None, None, None
-
-        self.output_callback(f"{status} Baseline Matched. (Similarity: {similarity:.1%})", True)
-        return self.utid_n, self.utid_s, self.target_thread
-
-    def generate_point_scan_json(self, start_m, end_m):
-        if not self.utid_s or not self.utid_n:
-            return {"error": "Target threads not identified."}
-
-        self.output_callback("🚀 [JSON Engine] Isolating top 2 independent critical bottleneck segments...", True)
-
-        start_ts_n, end_ts_n = start_m['ts_n'], end_m['ts_n']
-        start_ts_s, end_ts_s = start_m['ts_s'], end_m['ts_s']
-            
-        # 1. 선정 로직 수정: 시간 범위 중첩을 체크하여 독립된 2개 사건 추출
-        worst_roots = self._find_worst_slices(self.utid_n, self.utid_s, start_ts_n, end_ts_n, start_ts_s, end_ts_s)
-        
-        if not worst_roots:
-            return {"worst_cases": []}
-
-        worst_cases_data = []
-        for i, root in enumerate(worst_roots):
-            # 2. Depth 3까지 트리 구축 (기본 구조 유지)
-            tree = self._build_json_tree_recursive(
-                slice_id=root['id'],
-                name=root['name'],
-                parent_delta=root['delta'],
-                depth=1,
-                start_ts_n=start_ts_n, end_ts_n=end_ts_n,
-                start_ts_s=start_ts_s, end_ts_s=end_ts_s 
-            )
-            
-            worst_cases_data.append({
-                "case_id": f"WC-00{i+1}",
-                "issue": f"Regression in {root['name']} (Delta: {root['delta']:.1f}ms)",
-                "total_duration": round(root['slow_ms'], 1),
-                "tree": tree
+        if unexplained_ghost_ms > 10.0:
+            final_incidents.append({
+                "slice_id": None, # 실제 슬라이스가 아니므로 ID 없음
+                "thread_name": "System/Kernel",
+                "slice_name": "Ghost Gap (Unexplained Silence)",
+                "delay_delta_ms": round(unexplained_ghost_ms, 2),
+                "self_running_ms": 0.0,
+                "wait_bottleneck_ms": 0.0,
+                "is_ghost_incident": True,
+                "start_timestamp": scan_range_start_ts_slow,
+                "duration_ns": int(unexplained_ghost_ms * 1e6)
             })
 
-        return {"worst_cases": worst_cases_data}
+        self.output_callback(f"✅ [Point-Scan] Found {len(final_incidents)} incidents covering {captured_delay_sum_ms/total_observed_delay_ms:.1%} of delay.", True)
 
-    def _build_json_tree_recursive(self, slice_id, name, parent_delta, depth, start_ts_n, end_ts_n, start_ts_s, end_ts_s):
-        if depth > 3: return None
-        s_metrics = self._get_node_metrics_by_id(self._common_api.tp_s, self.utid_s, slice_id, start_ts_s, end_ts_s)
-        n_metrics = self._get_node_metrics_by_name(self._common_api.tp_n, self.utid_n, name, start_ts_n, end_ts_n)
-        if not s_metrics: return None
-        delta = s_metrics['dur'] - (n_metrics['dur'] if n_metrics else 0)
-        node_data = {
-            "name": name, "delta_time": round(delta, 1), "self_time": round(s_metrics['self'], 1),
-            "wait_time": round(s_metrics['wait'], 1), "impact_ratio": round(max(0, delta / parent_delta), 2) if parent_delta > 0 else 0.0,
-            "children": [], "target_id": int(slice_id), "__internal_ts": s_metrics['raw_ts'],
-            "__internal_dur": s_metrics['raw_dur'], "__internal_utid": int(self.utid_s)
+        return {
+            "analysis_metadata": {
+                "milestone_range": f"{start_milestone_data['name']} ~ {end_milestone_data['name']}",
+                "total_delay_ms": round(total_observed_delay_ms, 2),
+                "captured_delay_ms": round(captured_delay_sum_ms, 2),
+                "coverage_efficiency": round(captured_delay_sum_ms / total_observed_delay_ms, 2) if total_observed_delay_ms > 0 else 0
+            },
+            "incidents": final_incidents
         }
-        if depth < 3:
-            children_df = self._get_structural_children(self._common_api.tp_s, slice_id)
-            if not children_df.empty:
-                child_candidates = []
-                for _, child in children_df.iterrows():
-                    c_n_m = self._get_node_metrics_by_name(self._common_api.tp_n, self.utid_n, child['name'], start_ts_n, end_ts_n)
-                    c_n_d = c_n_m['dur'] if c_n_m else 0
-                    child_candidates.append({"id": int(child['id']), "name": child['name'], "delta": (child['dur']/1e6) - c_n_d})
-                child_candidates.sort(key=lambda x: x['delta'], reverse=True)
-                for c in child_candidates[:3]:
-                    c_node = self._build_json_tree_recursive(c['id'], c['name'], delta, depth + 1, start_ts_n, end_ts_n, start_ts_s, end_ts_s)
-                    if c_node: node_data["children"].append(c_node)
-        return node_data
 
-    def _find_worst_slices(self, utid_n, utid_s, start_ts_n, end_ts_n, start_ts_s, end_ts_s, limit=2):
-        self.output_callback("🛰️ [Deep Scan] Identifying unique, non-overlapping delay clusters across all layers...", True)
-        
-        # 1. Slow 트레이스의 타겟 구간 내 모든 슬라이스 수집
-        query_s = f"""
-            SELECT id, name, ts, dur, dur/1e6 as slow_ms
-            FROM slice 
-            WHERE track_id IN (SELECT id FROM thread_track WHERE utid = {utid_s})
-            AND ts >= {start_ts_s} AND (ts + dur) <= {end_ts_s}
+    def _get_threads_by_package(self, package_name):
+        query = f"""
+            SELECT utid, name 
+            FROM thread 
+            WHERE upid IN (SELECT upid FROM process WHERE name = '{package_name}')
         """
-        df_all_s = self._common_api.tp_s.query(query_s).as_pandas_dataframe()
-        if df_all_s.empty: return []
+        df = self._common_api.tp_s.query(query).as_pandas_dataframe()
+        return df.set_index('utid')['name'].to_dict() if not df.empty else {}
 
-        # 2. Normal 트레이스에서 대조군 데이터 확보 (f-string 따옴표 에러 방지 처리)
-        names_list = df_all_s['name'].unique()
-        names_str = ", ".join(["'" + n.replace("'", "''") + "'" for n in names_list])
-        query_n = f"""
-            SELECT name, AVG(dur)/1e6 as avg_n 
-            FROM slice 
-            WHERE track_id IN (SELECT id FROM thread_track WHERE utid = {utid_n}) 
-            AND ts >= {start_ts_n} AND (ts + dur) <= {end_ts_n}
-            AND name IN ({names_str}) 
+    def _collect_delay_candidates_across_threads(self, thread_map, start_s, end_s, start_n, end_n):
+        target_utids = ",".join(map(str, thread_map.keys()))
+        
+        # [수정 포인트] slice 테이블에는 utid가 없으므로 thread_track과 JOIN하여 utid를 가져옵니다.
+        query_slow = f"""
+            SELECT s.id, s.name, s.ts, s.dur, t.utid 
+            FROM slice s
+            JOIN thread_track t ON s.track_id = t.id
+            WHERE t.utid IN ({target_utids})
+            AND s.ts >= {start_s} AND (s.ts + s.dur) <= {end_s}
+            ORDER BY s.dur DESC LIMIT 100
+        """
+        df_slow = self._common_api.tp_s.query(query_slow).as_pandas_dataframe()
+        if df_slow.empty: return []
+
+       # Normal 트레이스 대조군 데이터 확보 (JOIN을 사용하여 성능과 가독성 확보)
+        unique_names = df_slow['name'].unique()
+        name_filter = ",".join(["'" + n.replace("'", "''") + "'" for n in unique_names])
+        
+        query_normal = f"""
+            SELECT s.name, AVG(s.dur)/1e6 as avg_ms_normal 
+            FROM slice s
+            JOIN thread_track tt ON s.track_id = tt.id
+            JOIN thread t ON tt.utid = t.utid
+            WHERE t.upid = {self._common_api.upid_n}
+            AND s.ts >= {start_n} AND (s.ts + s.dur) <= {end_n}
+            AND s.name IN ({name_filter}) 
             GROUP BY 1
         """
-        df_n = self._common_api.tp_n.query(query_n).as_pandas_dataframe()
-        avg_map = dict(zip(df_n['name'], df_n['avg_n']))
+        df_normal = self._common_api.tp_n.query(query_normal).as_pandas_dataframe()
+        normal_lookup = dict(zip(df_normal['name'], df_normal['avg_ms_normal']))
 
-        # 3. 모든 인스턴스에 대해 지연 기여도(Delta) 계산
-        candidates = []
-        for _, row in df_all_s.iterrows():
-            avg_val = avg_map.get(row['name'], 0) # Normal에 없으면 0ms (순수 신규 지연)
-            delta = row['slow_ms'] - avg_val
-            candidates.append({
-                'id': int(row['id']), 'name': row['name'], 
-                'ts': int(row['ts']), 'dur': int(row['dur']),
-                'delta': delta, 'slow_ms': row['slow_ms']
+        incident_candidates = []
+        for _, row in df_slow.iterrows():
+            slow_ms = row['dur'] / 1e6
+            normal_ms = normal_lookup.get(row['name'], 0.0)
+            delay_delta = slow_ms - normal_ms
+            
+            if delay_delta <= 2.0: continue
+
+            # 물리 지표 상세 계산
+            metrics = self._calculate_physical_metrics(row['utid'], row['ts'], row['dur'])
+            
+            incident_candidates.append({
+                "slice_id": int(row['id']),
+                "thread_name": thread_map.get(row['utid'], "Unknown"),
+                "slice_name": row['name'],
+                "delay_delta_ms": round(delay_delta, 2),
+                "self_running_ms": metrics['running_ms'],
+                "wait_bottleneck_ms": metrics['waiting_ms'],
+                "start_timestamp": int(row['ts']),
+                "duration_ns": int(row['dur']),
+                "is_ghost_incident": False
             })
         
-        # Delta가 큰 순서대로 정렬
-        candidates.sort(key=lambda x: x['delta'], reverse=True)
+        return sorted(incident_candidates, key=lambda x: x['delay_delta_ms'], reverse=True)
 
-        # 4. [핵심] 시간 범위 중첩 필터: 부모-자식-후손 관계 원천 차단
-        worst_instances = []
-        for cand in candidates:
-            if len(worst_instances) >= limit: break
-            
-            is_redundant = False
-            c_start, c_end = cand['ts'], cand['ts'] + cand['dur']
-            
-            for selected in worst_instances:
-                s_start, s_end = selected['ts'], selected['ts'] + selected['dur']
-                # 두 슬라이스의 시간이 겹치면 같은 계통(Stack)임
-                if (c_start >= s_start and c_end <= s_end) or \
-                   (s_start >= c_start and s_end <= c_end):
-                    is_redundant = True
-                    break
-            
-            if not is_redundant:
-                worst_instances.append(cand)
-        
-        return worst_instances
-
-    def _get_node_metrics_by_id(self, tp, utid, slice_id, start_ts=None, end_ts=None):
+    def _calculate_physical_metrics(self, utid, ts, dur_ns):
+        """thread_state를 분석하여 실제 Running과 Waiting 시간을 분리합니다."""
+        query = f"""
+            SELECT state, SUM(dur) as dur_ns
+            FROM thread_state 
+            WHERE utid = {utid} AND ts >= {ts} AND (ts + dur) <= {ts + dur_ns}
+            GROUP BY 1
         """
-        [수정] Self Time 계산 방식을 Running State 기반으로 변경하여 정확도 향상
-        """
-        query = f"SELECT ts, dur FROM slice WHERE id = {slice_id}"
-        res = tp.query(query).as_pandas_dataframe()
-        if res.empty: return None
+        df = self._common_api.tp_s.query(query).as_pandas_dataframe()
+        if df.empty: return {"running_ms": 0.0, "waiting_ms": 0.0}
         
-        s_ts, s_dur = res.iloc[0]['ts'], res.iloc[0]['dur']
-        a_start = max(s_ts, start_ts) if start_ts is not None else s_ts
-        a_end = min(s_ts + s_dur, end_ts) if end_ts is not None else s_ts + s_dur
+        running_ms = df[df['state'].isin(['Running', 'R'])]['dur_ns'].sum() / 1e6
+        waiting_ms = df[df['state'].isin(['R', 'D', 'DK', 'S'])]['dur_ns'].sum() / 1e6
         
-        # Thread State 정밀 분석
-        state_query = f"""
-            SELECT state, SUM(CASE 
-                WHEN ts < {a_start} THEN ts + dur - {a_start}
-                WHEN ts + dur > {a_end} THEN {a_end} - ts
-                ELSE dur END) as clipped_dur_ns
-            FROM thread_state WHERE utid = {utid} 
-            AND ts + dur > {a_start} AND ts < {a_end} GROUP BY 1
-        """
-        st_res = tp.query(state_query).as_pandas_dataframe()
-        
-        # 실제 실행 시간 (Running)
-        running_ms = st_res[st_res['state'].isin(['Running', 'R'])]['clipped_dur_ns'].sum() / 1e6
-        # 대기 시간 (Wait/Runnable/Blocked)
-        total_wait_ms = st_res[st_res['state'].isin(['R', 'D', 'DK'])]['clipped_dur_ns'].sum() / 1e6
-        
-        # [수정] Self Time은 이제 뺄셈이 아니라 실제 Running 상태를 기준으로 합니다.
         return {
-            'dur': round((a_end - a_start) / 1e6, 2),
-            'self': round(running_ms, 2), # 병렬 실행 시에도 모순이 없는 수치
-            'wait': round(total_wait_ms, 2),
-            'raw_ts': s_ts, 'raw_dur': s_dur
+            "running_ms": round(running_ms, 2),
+            "waiting_ms": round(waiting_ms, 2)
         }
 
-    def _get_node_metrics_by_name(self, tp, utid, name, start_ts=None, end_ts=None):
-        clean_name = name.replace("'", "''")
-        query = f"SELECT id FROM slice WHERE track_id IN (SELECT id FROM thread_track WHERE utid = {utid}) AND name = '{clean_name}' AND ts >= {start_ts} AND (ts + dur) <= {end_ts} ORDER BY dur DESC LIMIT 1"
-        res = tp.query(query).as_pandas_dataframe()
-        return self._get_node_metrics_by_id(tp, utid, res.iloc[0]['id'], start_ts, end_ts) if not res.empty else None
-
-    def _get_structural_children(self, tp, parent_id):
-        return tp.query(f"SELECT id, name, ts, dur FROM slice WHERE parent_id = {parent_id} ORDER BY dur DESC LIMIT 10").as_pandas_dataframe()
-
-    def get_global_bounds(self, tp_type="slow"):
-        tp = self._common_api.tp_s if tp_type == "slow" else self._common_api.tp_n
-        if tp is None: return None
-        try:
-            res = tp.query("SELECT start_ts, end_ts FROM trace_bounds").as_pandas_dataframe()
-            if not res.empty and pd.notna(res.iloc[0, 0]): return [int(res.iloc[0, 0]), int(res.iloc[0, 1])]
-            res = tp.query("SELECT MIN(ts), MAX(ts+dur) FROM slice").as_pandas_dataframe()
-            if not res.empty and pd.notna(res.iloc[0, 0]): return [int(res.iloc[0, 0]), int(res.iloc[0, 1])]
-        except: pass
-        return None
-
-    def get_thread_candidates(self, tp, upid, global_ts=None):
-        if tp is None or upid is None: return None
-        ts_f = f"AND ts >= {global_ts[0]} AND ts < {global_ts[1]}" if global_ts else ""
-        query = f"SELECT t.utid, t.name AS thread_name, ((CASE WHEN t.name = p.name THEN 150 ELSE 0 END) + (CASE WHEN EXISTS (SELECT 1 FROM slice s JOIN thread_track tt ON s.track_id = tt.id WHERE tt.utid = t.utid {ts_f} AND (s.name LIKE 'Choreographer%' OR s.name LIKE 'doFrame%') LIMIT 1) THEN 250 ELSE 0 END) + COALESCE((SELECT SUM(dur)/1e6 FROM thread_state ts WHERE ts.utid = t.utid AND ts.state IN ('R', 'D', 'DK') {ts_f}), 0) * 0.05) AS total_score FROM thread t JOIN process p USING(upid) WHERE p.upid = {upid} ORDER BY total_score DESC;"
-        return tp.query(query).as_pandas_dataframe()
-
-    def check_thread_similarity(self, utid_n, utid_s):
-        def get_set(tp, utid):
-            df = tp.query(f"SELECT DISTINCT name FROM slice WHERE track_id IN (SELECT id FROM thread_track WHERE utid = {utid}) LIMIT 100").as_pandas_dataframe()
-            return set(df['name']) if not df.empty else set()
-        sn, ss = get_set(self._common_api.tp_n, utid_n), get_set(self._common_api.tp_s, utid_s)
-        return len(sn & ss) / len(sn | ss) if sn and ss else 0.0
-
-    def _abort_investigation(self, reason, detail):
-        self.output_callback(f"\n❌ [ANALYSIS ABORTED] {reason}\n   - {detail}", True)
-
-    def get_clean_json_for_ai(self, data):
-        if isinstance(data, list): return [self.get_clean_json_for_ai(i) for i in data]
-        if isinstance(data, dict): return {k: self.get_clean_json_for_ai(v) for k, v in data.items() if not k.startswith("__internal")}
-        return data
+    def _select_independent_worst_incidents(self, candidates, total_delay_ms, goal_ratio):
+        selected = []
+        accumulated_ms = 0
+        threshold_ms = total_delay_ms * goal_ratio
+        
+        for cand in candidates:
+            if accumulated_ms >= threshold_ms or len(selected) >= 5:
+                break
+            
+            is_independent = True
+            c_start, c_end = cand['start_timestamp'], cand['start_timestamp'] + cand['duration_ns']
+            
+            for sel in selected:
+                s_start, s_end = sel['start_timestamp'], sel['start_timestamp'] + sel['duration_ns']
+                if max(c_start, s_start) < min(c_end, s_end):
+                    is_independent = False
+                    break
+            
+            if is_independent:
+                selected.append(cand)
+                accumulated_ms += cand['delay_delta_ms']
+                
+        return selected

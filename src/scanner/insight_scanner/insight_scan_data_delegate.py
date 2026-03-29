@@ -19,11 +19,10 @@ class InsightScanDataDelegate:
         return [self._generate_intensive_scan_single(collected_data, is_flat=True), for_report]
 
     def _generate_intensive_scan_single(self, collected_data, max_depth=100, is_flat=True):
-        target = collected_data.get("target_data", {})
         try:
-            t_id = int(target.get("target_id", 0))
-            start_ns = int(target.get("start_ts_ns", 0))
-            dur_ns = int(target.get("duration_ns", 0))
+            t_id = int(collected_data.get("target_id", 0))
+            start_ns = int(collected_data.get("start_ts_ns", 0))
+            dur_ns = int(collected_data.get("duration_ns", 0))
             end_ns = start_ns + dur_ns
         except (ValueError, TypeError):
             self.output_callback("🚨 [Error] Invalid target data format.", True)
@@ -91,31 +90,32 @@ class InsightScanDataDelegate:
         }
 
     def _trace_inheritance_recursive(self, parent_info, utid, depth, max_depth, total_case_dur, bounds_s, out_list):
-        """상속 경로를 따라가며 지연의 근원지를 추적합니다."""
         if depth > max_depth: return
 
         children_df = self._get_structural_children(self._common_api.tp_s, parent_info['slice_id'])
+        
         if children_df.empty:
             out_list.append(parent_info); return
 
         total_children_delta = children_df['dur'].sum() / 1e6
-        group_ratio = total_children_delta / parent_info['delta_time'] if parent_info['delta_time'] > 0 else 0
-
-        if group_ratio >= self.INHERITANCE_THRESHOLD:
-            top_child_row = children_df.iloc[0]
+        
+        # [수정] bindApplication 같은 거대 노드를 위한 특수 로직
+        # 자식들의 합이 부모 지연의 일정 수준 이상이면 무조건 1등 자식을 파고듭니다.
+        if total_children_delta >= (parent_info['delta_time'] * self.INHERITANCE_THRESHOLD):
+            top_child_row = children_df.iloc[0] # 가장 긴 자식
             top_child_info = self._get_processed_node_data(
                 top_child_row['id'], top_child_row['name'], utid, depth, 
                 total_case_dur, bounds_s, parent_id=parent_info['slice_id']
             )
 
-            # Spamming 감지 (자식들 합은 큰데 1등 자식이 독보적이지 않을 때)
-            if top_child_info and (top_child_info['delta_time'] / parent_info['delta_time']) < self.INHERITANCE_THRESHOLD:
-                parent_info['reason'] = "Sequential_Spamming_Detected"
-                parent_info['sequential_children_count'] = len(children_df)
-                out_list.append(parent_info)
-            elif top_child_info:
+            # 1등 자식이 독보적이지 않아도(Spamming), 일단 리스트에는 추가하여 AI가 판단하게 함
+            if top_child_info:
+                # 자식 노드 추가
+                out_list.append(top_child_info)
+                # 더 깊이 내려가기
                 self._trace_inheritance_recursive(top_child_info, utid, depth + 1, max_depth, total_case_dur, bounds_s, out_list)
         else:
+            # 상속되지 않는 지연(현재 노드 자체의 문제)일 경우 멈춤
             out_list.append(parent_info)
 
     def _get_node_metrics_by_id(self, tp, utid, slice_id, start_ts, end_ts):
@@ -147,19 +147,52 @@ class InsightScanDataDelegate:
         return tp.query(f"SELECT id, name, ts, dur FROM slice WHERE parent_id = {parent_id} ORDER BY dur DESC").as_pandas_dataframe()
 
     def _build_recursive_node_pro(self, slice_id, name, utid, depth, max_depth, total_case_dur, bounds_s, parent_id=None):
-        """Tree 모드 전용 (계층 구조 보존)"""
         node_info = self._get_processed_node_data(slice_id, name, utid, depth, total_case_dur, bounds_s, parent_id)
         if not node_info or depth > max_depth: return None
 
         node_data = {**node_info, "children": []}
-        children_df = self._get_structural_children(self._common_api.tp_s, slice_id)
         
-        for _, child in children_df.iterrows():
+        # 1. 모든 자식 로드
+        children_df = self._get_structural_children(self._common_api.tp_s, slice_id)
+        if children_df.empty:
+            return node_data
+
+        # ---------------------------------------------------------
+        # ⚖️ [Balanced Mode] 전략적 가지치기
+        # ---------------------------------------------------------
+        # 조건 1: 부모 지연의 5% 이상 (상대적 중요도)
+        # 조건 2: 혹은 절대 시간이 5.0ms 이상 (절대적 중요도 - 16ms 프레임의 약 1/3)
+        relative_threshold = node_info['delta_time'] * 0.05
+        absolute_floor = 5.0 
+
+        mask = (children_df['dur'] / 1e6 >= relative_threshold) | (children_df['dur'] / 1e6 >= absolute_floor)
+        
+        # 필터링 후 상위 5개만 최종 선별
+        significant_children = children_df[mask].head(5)
+        
+        # 2. 통계적 정합성 확보 (기타 슬라이스 합산)
+        all_children_sum = children_df['dur'].sum() / 1e6
+        top_children_sum = significant_children['dur'].sum() / 1e6
+        others_delta = round(max(0, all_children_sum - top_children_sum), 1)
+
+        # 3. 선별된 핵심 용의자들만 재귀 탐색
+        for _, child in significant_children.iterrows():
             child_node = self._build_recursive_node_pro(
                 child['id'], child['name'], utid, depth + 1, 
                 max_depth, total_case_dur, bounds_s, parent_id=slice_id
             )
-            if child_node: node_data["children"].append(child_node)
+            if child_node: 
+                node_data["children"].append(child_node)
+
+        # 4. AI를 위한 상황 요약 노드 추가
+        if others_delta > 1.0:
+            node_data["children"].append({
+                "name": "Sum_of_Minor_Slices_Filtered",
+                "delta_time": others_delta,
+                "is_leaf": True,
+                "note": f"Filtered by Balance Mode (Rel < {relative_threshold:.1f}ms & Abs < {absolute_floor}ms)"
+            })
+            
         return node_data
 
     def summarize_investigation(self, app_package, selected_milestone_info, flat_data, full_data):

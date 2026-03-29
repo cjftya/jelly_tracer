@@ -10,8 +10,8 @@ class InsightScanner(BaseScanner):
         self.data_provider = None
         self.ai_analyst = None
 
-    def start(self, common_api, target_package, ollama_manager, output_callback):
-        super().start(common_api, target_package, ollama_manager, output_callback)
+    def start(self, common_api, target_package, llm_requester, output_callback):
+        super().start(common_api, target_package, llm_requester, output_callback)
         if self.data_provider is None:
             self.data_provider = InsightScanDataDelegate(output_callback)
             self.data_provider.init(common_api, target_package)
@@ -19,11 +19,11 @@ class InsightScanner(BaseScanner):
             self.data_provider.output_callback = output_callback
             
         if self.ai_analyst is None:
-            self.ai_analyst = InsightScanAIDelegate(ollama_manager, output_callback)
+            self.ai_analyst = InsightScanAIDelegate(llm_requester, output_callback)
         else:
             self.ai_analyst.output_callback = output_callback
     
-    def run(self, output_callback=None):  
+    def run(self, output_callback=None):
         if output_callback:
             self.output_callback = output_callback
             self.data_provider.output_callback = output_callback
@@ -33,7 +33,7 @@ class InsightScanner(BaseScanner):
 
         if not self.collected_data:
             self.output_callback("⚠️ [Error] Master data (collected_data) is missing. Cannot proceed.", True)
-            return
+            return None
 
         try:
             self.output_callback("🔬 Drilling into trace layers ...")
@@ -43,20 +43,17 @@ class InsightScanner(BaseScanner):
 
             if not deep_dive_evidence:
                 self.output_callback("⚠️ [Error] Deep dive evidence is missing. Cannot proceed.", True)
-                return
+                return None
 
             summary_context = self.data_provider.summarize_investigation(self.target_package, self.collected_data['milestones'],
                                                         deep_dive_evidence, full_tree_evidence)
-          
             raw_res = self.ai_analyst.request_analysis(summary_context)
 
-            Logger.log(f"InsightScan response\n{raw_res}")
-
-            thinking_text = raw_res.get('thinking', 'No thinking content available.')
-            self.output_callback(f"\n🧠 [AI Thinking...]\n{thinking_text}\n")
-
             final_report = self.generate_final_report(summary_context, raw_res)
-            self.output_callback(final_report)
+            thinking_text = raw_res.get('thinking', 'No thinking content available.')
+            ai_analyst_text = raw_res.get('analysis', 'No analysis content available.')
+            indented_ai_report = "\n".join([f"  {line}" for line in ai_analyst_text.split('\n')])
+            return [summary_context, final_report, thinking_text, indented_ai_report]
         except Exception as e:
             self.output_callback(f"❌ [Critical Error] Insight Scan failed: {str(e)}", True)
 
@@ -122,8 +119,8 @@ class InsightScanner(BaseScanner):
 
         # 2. 프로그레스 바 생성
         progress_bar = (
-            f"[App {'█' * app_blocks}{'░' * (10 - app_blocks)}┃"
-            f"{'█' * sys_blocks}{'░' * (10 - sys_blocks)} Sys]"
+            f"[App({app_ratio}%) {'█' * app_blocks}{'░' * (10 - app_blocks)}┃"
+            f"{'█' * sys_blocks}{'░' * (10 - sys_blocks)} Sys({sys_ratio}%)]"
         )
 
         # 3. 지연 시간에 따른 상태 및 아이콘 자동 결정

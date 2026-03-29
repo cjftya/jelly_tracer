@@ -4,6 +4,9 @@ import sys
 import threading
 import time
 import tkinter as tk
+from io import BytesIO
+from pilmoji.source import BaseSource
+from pathlib import Path
 from tkinter import filedialog, messagebox
 
 import customtkinter as ctk
@@ -81,8 +84,7 @@ class ExecutorThread(threading.Thread):
 
         try:
             try:
-                # self.executor.start() 는 이제 GUI 시작 시 한 번만 실행됨
-                self.token_total = self.engine.ollamaManager.get_context_size()
+                self.token_total = self.engine.llm_requester.get_context_size()
             except Exception:
                 self.token_total = 0
             
@@ -100,6 +102,34 @@ class ExecutorThread(threading.Thread):
         # 낱개 쓰레드 중단 시 Executor를 끄지 않음
         self._stop_event.set()
 
+class LocalTwemojiSource(BaseSource):
+    def __init__(self, emoji_dir: str = "./assets"):
+        self.emoji_dir = Path(emoji_dir)
+
+    def _to_code(self, emoji: str) -> str:
+        codepoints = [f"{ord(c):x}" for c in emoji if ord(c) != 0xfe0f]
+        return "-".join(codepoints)
+
+    def get_emoji(self, emoji: str) -> BytesIO | None:  # ← bytes 아니고 BytesIO
+        code = self._to_code(emoji)
+        path = self.emoji_dir / f"{code}.png"
+
+        if not path.exists():
+            # fe0f 포함 버전도 시도
+            code_full = "-".join(f"{ord(c):x}" for c in emoji)
+            path = self.emoji_dir / f"{code_full}.png"
+
+        if path.exists():
+            return BytesIO(path.read_bytes())  # ← 여기가 핵심
+
+        print(f"[MISS] {emoji} → {code}.png")
+        return None
+
+    def get_discord_emoji(self, id: int) -> BytesIO | None:
+        return None
+
+    def request(self, url: str, **kwargs):
+        raise RuntimeError(f"네트워크 차단: {url}")
 
 class CTkPilmojiLabel(ctk.CTkLabel):
     """Render colored emojis using pilmoji inside a CTkLabel (via CTkImage)."""
@@ -108,6 +138,7 @@ class CTkPilmojiLabel(ctk.CTkLabel):
         self._font_path = font_path
         self._text_color = kwargs.get("text_color", "#D0D0D0")
         self._original_text = kwargs.get("text", "")
+        self._source = LocalTwemojiSource()
         # Suppress standard text rendering
         kwargs["text"] = ""
         super().__init__(master, **kwargs)
@@ -131,7 +162,7 @@ class CTkPilmojiLabel(ctk.CTkLabel):
 
         # Measurement using dummy image
         dummy = Image.new("RGBA", (1, 1), (0, 0, 0, 0))
-        with Pilmoji(dummy) as pilmoji:
+        with Pilmoji(dummy, source=self._source) as pilmoji:
             w, h = pilmoji.getsize(text, font=font)
             # Add some padding
             w = int(w) + 10
@@ -139,7 +170,7 @@ class CTkPilmojiLabel(ctk.CTkLabel):
 
         # Render RGBA image with transparent background
         img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
-        with Pilmoji(img) as pilmoji:
+        with Pilmoji(img, source=self._source) as pilmoji:
             # Draw with the exact text_color
             pilmoji.text((0, 5), text, font=font, fill=self._get_current_color())
 
@@ -200,7 +231,7 @@ class TraceGui(ctk.CTk):
         
         # 설치된 모델 목록 가져와서 콤보박스 업데이트
         try:
-            models = self.engine.ollamaManager.get_installed_models()
+            models = self.engine.llm_requester.get_installed_models()
             if models:
                 self.after(0, lambda: self.model_combo.configure(values=models))
                 # 현재 선택된 모델이 목록에 있으면 유지, 없으면 첫 번째 모델 선택
@@ -244,6 +275,30 @@ class TraceGui(ctk.CTk):
         self.package_edit.insert(0, "com.sec.android.gallery3d")
         self.package_edit.grid(row=1, column=0, padx=25, pady=10, sticky="ew")
 
+        self.client_label = CTkPilmojiLabel(
+            self.sidebar_frame,
+            text="📡 AI CLIENT",
+            font_size=12,
+            text_color="#94A3B8",
+            anchor="w",
+        )
+        self.client_label.grid(row=2, column=0, padx=25, pady=(20, 0), sticky="ew")
+
+        self.client_combo = ctk.CTkOptionMenu(
+            self.sidebar_frame,
+            values=["google_studio", "ollama"],
+            height=40,
+            command=self._on_client_change,
+            fg_color="#21262D",
+            button_color="#30363D",
+            button_hover_color="#3D444D",
+            corner_radius=4,
+            font=ctk.CTkFont(weight="bold"),
+            dropdown_font=ctk.CTkFont(weight="bold")
+        )
+        self.client_combo.set("google_studio")
+        self.client_combo.grid(row=3, column=0, padx=25, pady=(0, 10), sticky="ew")
+
         self.model_label = CTkPilmojiLabel(
             self.sidebar_frame,
             text="🤖 AI MODEL",
@@ -251,7 +306,7 @@ class TraceGui(ctk.CTk):
             text_color="#94A3B8",
             anchor="w",
         )
-        self.model_label.grid(row=2, column=0, padx=25, pady=(5, 0), sticky="ew")
+        self.model_label.grid(row=4, column=0, padx=25, pady=(5, 0), sticky="ew")
 
         self.model_combo = ctk.CTkOptionMenu(
             self.sidebar_frame,
@@ -265,7 +320,28 @@ class TraceGui(ctk.CTk):
             dropdown_font=ctk.CTkFont(weight="bold")
         )
         self.model_combo.set("model")
-        self.model_combo.grid(row=3, column=0, padx=25, pady=(0, 10), sticky="ew")
+        self.model_combo.grid(row=5, column=0, padx=25, pady=(0, 10), sticky="ew")
+
+        self.api_key_label = CTkPilmojiLabel(
+            self.sidebar_frame,
+            text="🔑 API KEY",
+            font_size=12,
+            text_color="#94A3B8",
+            anchor="w",
+        )
+        self.api_key_label.grid(row=6, column=0, padx=25, pady=(5, 0), sticky="ew")
+
+        self.api_key_edit = ctk.CTkEntry(
+            self.sidebar_frame,
+            placeholder_text="Enter API Key",
+            height=40,
+            border_width=0,
+            fg_color="#0D1117",
+            corner_radius=4,
+            font=ctk.CTkFont(family="Consolas", size=12),
+            show="*"
+        )
+        self.api_key_edit.grid(row=7, column=0, padx=25, pady=(0, 15), sticky="ew")
 
         # Load Data Button
         self.btn_load_data = ctk.CTkButton(
@@ -279,7 +355,7 @@ class TraceGui(ctk.CTk):
             border_width=0,
             font=ctk.CTkFont(size=12, weight="bold"),
         )
-        self.btn_load_data.grid(row=4, column=0, padx=25, pady=(20, 10), sticky="ew")
+        self.btn_load_data.grid(row=8, column=0, padx=25, pady=(20, 10), sticky="ew")
 
         # Range Selection
         self.range_label = CTkPilmojiLabel(
@@ -289,10 +365,10 @@ class TraceGui(ctk.CTk):
             text_color="#94A3B8",
             anchor="w",
         )
-        self.range_label.grid(row=7, column=0, padx=25, pady=(15, 0), sticky="ew")
+        self.range_label.grid(row=9, column=0, padx=25, pady=(15, 0), sticky="ew")
 
         self.range_frame = ctk.CTkFrame(self.sidebar_frame, fg_color="transparent")
-        self.range_frame.grid(row=8, column=0, padx=25, pady=(5, 10), sticky="ew")
+        self.range_frame.grid(row=10, column=0, padx=25, pady=(5, 10), sticky="ew")
         self.range_frame.grid_columnconfigure(0, weight=1)
 
         self.start_slider = ctk.CTkSlider(
@@ -325,6 +401,30 @@ class TraceGui(ctk.CTk):
         )
         self.end_val_label.grid(row=3, column=0, sticky="ew")
 
+        # Analysis Mode Selection
+        self.mode_label = CTkPilmojiLabel(
+            self.sidebar_frame,
+            text="🔍 ANALYSIS MODE",
+            font_size=12,
+            text_color="#94A3B8",
+            anchor="w",
+        )
+        self.mode_label.grid(row=11, column=0, padx=25, pady=(15, 0), sticky="ew")
+
+        self.mode_combo = ctk.CTkOptionMenu(
+            self.sidebar_frame,
+            values=["Fast Analysis", "Deep Analysis"],
+            height=40,
+            fg_color="#21262D",
+            button_color="#30363D",
+            button_hover_color="#3D444D",
+            corner_radius=4,
+            font=ctk.CTkFont(weight="bold"),
+            dropdown_font=ctk.CTkFont(weight="bold")
+        )
+        self.mode_combo.set("Fast Analysis")
+        self.mode_combo.grid(row=12, column=0, padx=25, pady=(0, 10), sticky="ew")
+
         # Separator-like padding
         self.path_label = CTkPilmojiLabel(
             self.sidebar_frame,
@@ -333,11 +433,11 @@ class TraceGui(ctk.CTk):
             text_color="#FFFFFF",
             anchor="w",
         )
-        self.path_label.grid(row=11, column=0, padx=25, pady=(20, 10), sticky="ew")
+        self.path_label.grid(row=13, column=0, padx=25, pady=(20, 10), sticky="ew")
 
         # Path Selection
         self.path_frame = ctk.CTkFrame(self.sidebar_frame, fg_color="transparent")
-        self.path_frame.grid(row=12, column=0, padx=25, pady=10, sticky="ew")
+        self.path_frame.grid(row=14, column=0, padx=25, pady=10, sticky="ew")
         self.path_frame.grid_columnconfigure(0, weight=1)
 
         self.normal_edit = ctk.CTkEntry(
@@ -387,6 +487,22 @@ class TraceGui(ctk.CTk):
             font=ctk.CTkFont(weight="bold")
         )
         self.btn_s.grid(row=3, column=0, sticky="ew")
+
+        # Restart Button at the bottom
+        self.btn_restart = ctk.CTkButton(
+            self.sidebar_frame,
+            text="🔄 RESTART SYSTEM",
+            command=self._on_restart,
+            height=40,
+            fg_color="#0D1117",
+            hover_color="#1F242B",
+            corner_radius=4,
+            border_width=1,
+            border_color="#30363D",
+            text_color="#F85149",
+            font=ctk.CTkFont(size=11, weight="bold"),
+        )
+        self.btn_restart.grid(row=100, column=0, padx=25, pady=(100, 20), sticky="ew")
 
         # --- Main Content ---
         self.main_container = ctk.CTkFrame(self, corner_radius=0, fg_color="#0D1117")
@@ -619,7 +735,10 @@ class TraceGui(ctk.CTk):
         normal = self.normal_edit.get().strip()
         slow = self.slow_edit.get().strip()
         target_pkg = self.package_edit.get().strip()
+        client_type = self.client_combo.get().strip()
         model = self.model_combo.get().strip()
+        api_key = self.api_key_edit.get().strip()
+        mode = self.mode_combo.get().strip()
 
         if not normal or not slow:
             messagebox.showwarning("Missing paths", "Both trace paths must be set.")
@@ -627,9 +746,15 @@ class TraceGui(ctk.CTk):
         if not target_pkg:
             messagebox.showwarning("Missing package", "Target package must be set.")
             return
+        if not client_type:
+             messagebox.showwarning("Missing Client", "AI Client must be selected.")
+             return
         if not model:
             messagebox.showwarning("Missing model", "Model name must be set.")
             return
+        if not api_key and client_type == "google_studio":
+             messagebox.showwarning("Missing API Key", "Google Studio requires an API Key.")
+             return
 
         # Disable button and show loading status
         self.btn_load_data.configure(state="disabled")
@@ -638,7 +763,7 @@ class TraceGui(ctk.CTk):
         def load_task():
             try:
                 # Call engine.load to initialize data and servers
-                self.engine.load(normal, slow, target_pkg, model)
+                self.engine.load(normal, slow, target_pkg, model, mode, client_type=client_type, api_key=api_key)
                 
                 # Update GUI on the main thread after successful load
                 self.after(0, self._on_load_success)
@@ -650,13 +775,24 @@ class TraceGui(ctk.CTk):
 
     def _on_load_success(self):
         """Callback for successful data loading."""
-        self.btn_load_data.configure(state="normal")
+        self.btn_load_data.configure(state="disabled")
         self.run_button.configure(state="normal")
         self.start_slider.configure(state="normal")
         self.end_slider.configure(state="normal")
         
+        # Disable all configuration inputs after successful load to lock the session context
+        self.package_edit.configure(state="disabled")
+        self.client_combo.configure(state="disabled")
+        self.model_combo.configure(state="disabled")
+        self.api_key_edit.configure(state="disabled")
+        self.mode_combo.configure(state="disabled")
+        self.normal_edit.configure(state="disabled")
+        self.btn_n.configure(state="disabled")
+        self.slow_edit.configure(state="disabled")
+        self.btn_s.configure(state="disabled")
+        
         self.status_label.configure(text="📦 Data Loaded - Ready")
-        messagebox.showinfo("Load Data", "Trace data loaded successfully. Analysis tools are now enabled.")
+        messagebox.showinfo("Load Data", f"Trace data loaded successfully. Analysis tools are now enabled.\n\nSettings are locked for this session. Use 'RESTART SYSTEM' to load different traces.")
 
     def _on_load_error(self, error):
         """Callback for failed data loading."""
@@ -672,7 +808,10 @@ class TraceGui(ctk.CTk):
         self.run_button.configure(state="disabled")
         self.btn_load_data.configure(state="disabled")
         self.package_edit.configure(state="disabled")
+        self.client_combo.configure(state="disabled")
         self.model_combo.configure(state="disabled")
+        self.api_key_edit.configure(state="disabled")
+        self.mode_combo.configure(state="disabled")
         self.start_slider.configure(state="disabled")
         self.end_slider.configure(state="disabled")
         self.normal_edit.configure(state="disabled")
@@ -699,6 +838,26 @@ class TraceGui(ctk.CTk):
             end_m_index=int(self.end_slider.get()),
         )
         self.thread.start()
+
+    def _on_client_change(self, client_type):
+        """Update the model list when the client is switched."""
+        try:
+            self.engine.llm_requester.set_client(client_type)
+            models = self.engine.llm_requester.get_installed_models()
+            if models:
+                self.model_combo.configure(values=models)
+                self.model_combo.set(models[0])
+            
+            # Key show/hide depending on client
+            if client_type == "ollama":
+                self.api_key_edit.configure(state="disabled", fg_color="#21262D")
+                self.api_key_label.configure(text_color="#4B5563")
+            else:
+                self.api_key_edit.configure(state="normal", fg_color="#0D1117")
+                self.api_key_label.configure(text_color="#94A3B8")
+                
+        except Exception as e:
+            print(f"⚠️ 클라이언트 전환 중 오류: {e}")
 
     def _append_line(self, line: str, system: bool = False):
         # Route to AI or System based on the system flag
@@ -737,17 +896,10 @@ class TraceGui(ctk.CTk):
         def finalize():
             self.status_label.configure(text="🏁 Analysis Complete")
             
-            # Re-enable UI controls to allow multiple runs
+            # Re-enable only analysis controls (Config remains locked)
             self.run_button.configure(state="normal")
-            self.btn_load_data.configure(state="normal")
-            self.package_edit.configure(state="normal")
-            self.model_combo.configure(state="normal")
             self.start_slider.configure(state="normal")
             self.end_slider.configure(state="normal")
-            self.normal_edit.configure(state="normal")
-            self.btn_n.configure(state="normal")
-            self.slow_edit.configure(state="normal")
-            self.btn_s.configure(state="normal")
             
             messagebox.showinfo("Done", "Analysis finished. Logs have been preserved. You can run another analysis or load new data.")
 
@@ -757,6 +909,33 @@ class TraceGui(ctk.CTk):
         pct = int(used / total * 100) if total > 0 else 0
         self.token_label.configure(text=f"Tokens: {used:,} / {total:,} ({pct}%)")
         self.token_bar.set(used / total if total > 0 else 0)
+
+    def _on_restart(self):
+        if not messagebox.askyesno("Restart", "Restart the application? All current session data will be cleared."):
+            return
+            
+        self.status_label.configure(text="♻️ Restarting...")
+        self.update()
+
+        # Perform full cleanup
+        if self.thread and self.thread.is_alive():
+            self.thread.stop()
+        
+        if self.engine:
+            self.engine.stop()
+
+        if hasattr(self, "original_stdout"):
+            sys.stdout = self.original_stdout
+
+        import os
+        import subprocess
+        
+        # Launch new process
+        subprocess.Popen([sys.executable] + sys.argv)
+        
+        # Close current process
+        self.destroy()
+        sys.exit()
 
     def _on_close(self):
         if self.thread and self.thread.is_alive():

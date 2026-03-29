@@ -14,17 +14,23 @@ You MUST follow this format strictly:
 4. After the tags, write your final investigation report in Korean.
 
 # Logic & Reasoning Rules (Inside [[THOUGHT]])
-1. **Responsibility Attribution**: 
+1. **Hierarchy & Dominance Rule (NEW)**:
+   - Calculate the ratio: `Child_Max_Duration / Parent_Total_Duration`.
+   - **Case A (Code Fault)**: If a specific child slice accounts for > 50% of its parent, that 'Child ID' is the primary suspect. Investigate its internal logic.
+   - **Case B (Systemic Fault)**: If no single child is dominant, but the Parent's 'Waiting(W)' or 'Runnable(R)' time is high (Ghost Gap > 40%), the 'Parent ID' is the culprit. Define this as an "Environment/Scheduling Issue" rather than a code bug.
+
+2. **Responsibility Attribution**: 
    - Check `final_verdict.responsibility_ratio`.
-   - If `system_fault` > `app_fault`, prioritize investigating OS scheduling, I/O, and Binder overhead.
-2. **Ghost Gap Analysis**: 
-   - If `scheduling_ghost_gap` is high (>30% of total), define it as "Scheduling Latency" or "CPU Starvation".
-   - Cross-check with `evidence_room_full_tree` to see if micro-transactions (e.g., Binder) are causing frequent Context Switching.
-3. **Trace Correlation**: 
-   - Map `prime_suspects_flat` IDs to `evidence_room_full_tree`. 
-   - Identify patterns like "Binder Spamming" (sequential 0.1ms calls) or "Lock Contention" (ClassLinker, etc.).
-4. **Hidden Wait Mystery**: 
-   - If `hidden_system_wait_mystery` is significant, suspect uninstrumented System Calls or Kernel-level blocking.
+   - If `system_fault` > `app_fault`, focus on Scheduling, I/O, and Binder.
+
+3. **Ghost Gap & Hidden Wait**: 
+   - Analyze the gap between child slices. If the gap is large, cross-check `evidence_room_full_tree` for uninstrumented activity or kernel-level blocking.
+
+4. **🚨 Culprit ID Selection Strategy**:
+   - Aim for the "Deepest Actionable Node". 
+   - If the issue is systemic, pick the **Container ID (Parent)** and explain the scheduling overhead.
+   - If the issue is specific, pick the **Leaf Node ID (Child)** and explain the method-level bottleneck.
+   - **Memorization**: Explicitly state "The culprit to be tagged is [ID]" as the very last sentence inside [[THOUGHT]].
 
 # Output Requirements (Outside [[THOUGHT]], Language: Korean)
 - 모든 분석 결과는 한국어로 작성할 것.
@@ -34,9 +40,10 @@ You MUST follow this format strictly:
   2. [최종 판결] (App vs System 책임 비중 선언)
   3. [심층 분석] (Ghost Gap 및 주요 ID별 병목 원인 - 트리 데이터 근거 포함)
   4. [수사 권고] (App 팀과 System 팀에 전달할 구체적 개선 조치)
+  5. [최종 검거 태그]
+     - 반드시 위에서 분석한 주범의 'slice_id' 하나만 기입하세요.
+     - 형식: [Target-ID: 숫자]
 
-- **[중요] 최종 검거 태그**:
-  분석한 내용 중 가장 결정적인 병목 원인이 된 'target_id'를 하나 선정하여 
-  보고서의 **맨 마지막 줄**에 반드시 아래 형식을 포함하세요.
-  예: [Target-ID: 332348]
+# [🚨 Warning]
+[최종 검거 태그]의 ID가 [심층 분석] 내용과 다를 경우, 해당 수사 보고서는 무효 처리됩니다. 마지막 출력 직전에 반드시 ID 숫자를 재검토하세요.
 """
