@@ -20,9 +20,9 @@ class InsightScanDataDelegate:
 
     def _generate_intensive_scan_single(self, collected_data, max_depth=100, is_flat=True):
         try:
-            t_id = int(collected_data.get("target_id", 0))
-            start_ns = int(collected_data.get("start_ts_ns", 0))
-            dur_ns = int(collected_data.get("duration_ns", 0))
+            t_id = int(collected_data.get("target_id") or 0)
+            start_ns = int(collected_data.get("start_ts_ns") or 0)
+            dur_ns = int(collected_data.get("duration_ns") or 0)
             end_ns = start_ns + dur_ns
         except (ValueError, TypeError):
             self.output_callback("🚨 [Error] Invalid target data format.", True)
@@ -40,11 +40,10 @@ class InsightScanDataDelegate:
         s_metrics = self._get_node_metrics_by_id(self._common_api.tp_s, utid_s, t_id, start_ns, end_ns)
         total_case_duration = s_metrics['dur']
 
-        self.output_callback(f"🎯 [Investigation Started] {root_name} | Baseline Latency: {total_case_duration:.1f}ms", True)
+        self.output_callback(f"🎯 [Investigation Started] {root_name} | Baseline: {total_case_duration:.1f}ms", True)
 
         if is_flat:
             candidates = []
-            # 루트 노드는 parent_id가 없음
             root_info = self._get_processed_node_data(t_id, root_name, utid_s, 1, total_case_duration, [start_ns, end_ns], parent_id=None)
             if root_info:
                 self._trace_inheritance_recursive(root_info, utid_s, 2, max_depth, total_case_duration, [start_ns, end_ns], candidates)
@@ -58,150 +57,137 @@ class InsightScanDataDelegate:
         else:
             return self._build_recursive_node_pro(t_id, root_name, utid_s, 1, max_depth, total_case_duration, [start_ns, end_ns])
 
+    def _get_node_metrics_by_id(self, tp, utid, slice_id, start_ts, end_ts):
+        """[MRI 수사] 스레드 상태를 정밀 분석하되, 기존 wait_time 통합 수치도 제공"""
+        query = f"SELECT ts, dur FROM slice WHERE id = {slice_id}"
+        res = tp.query(query).as_pandas_dataframe()
+        if res.empty: return {'dur': 0, 'self': 0, 'wait': 0, 'io_ms': 0, 'runnable_ms': 0, 'mutex_ms': 0, 'cpu': -1}
+
+        s_ts, s_dur = res.iloc[0]['ts'], res.iloc[0]['dur']
+        a_start, a_end = max(s_ts, start_ts), min(s_ts + s_dur, end_ts)
+        a_dur_ns = max(0, a_end - a_start)
+
+        if a_dur_ns <= 0: return {'dur': 0, 'self': 0, 'wait': 0, 'io_ms': 0, 'runnable_ms': 0, 'mutex_ms': 0, 'cpu': -1}
+
+        st_query = f"""
+            SELECT state, cpu, SUM(CASE 
+                WHEN ts < {a_start} THEN ts + dur - {a_start}
+                WHEN ts + dur > {a_end} THEN {a_end} - ts
+                ELSE dur END) as clipped_ns
+            FROM thread_state WHERE utid = {utid} AND ts + dur > {a_start} AND ts < {a_end} GROUP BY 1, 2
+        """
+        st_res = tp.query(st_query).as_pandas_dataframe()
+        
+        # 1. 기존 summarize_investigation 호환용 (Self/Wait)
+        running_ms = st_res[st_res['state'].isin(['Running', 'R'])]['clipped_ns'].sum() / 1e6
+        wait_ms = st_res[st_res['state'].isin(['R+', 'D', 'DK', 'S', 'R'])]['clipped_ns'].sum() / 1e6 # 모든 비실행 상태 포함
+
+        # 2. AI 진단용 상세 물리 지표
+        runnable_ms = st_res[st_res['state'] == 'R+']['clipped_ns'].sum() / 1e6
+        io_ms = st_res[st_res['state'] == 'D']['clipped_ns'].sum() / 1e6
+        mutex_ms = st_res[st_res['state'] == 'S']['clipped_ns'].sum() / 1e6
+        top_cpu = -1
+        if not st_res.empty:
+            raw_cpu = st_res.sort_values(by='clipped_ns', ascending=False).iloc[0]['cpu']
+            if pd.notnull(raw_cpu): # Pandas의 null 체크 함수 사용
+                top_cpu = int(raw_cpu)
+
+        return {
+            'dur': round(a_dur_ns / 1e6, 2),
+            'self': round(running_ms, 2),
+            'wait': round(wait_ms, 2),
+            'io_ms': round(io_ms, 2),
+            'runnable_ms': round(runnable_ms, 2),
+            'mutex_ms': round(mutex_ms, 2),
+            'cpu': top_cpu
+        }
+
     def _get_processed_node_data(self, slice_id, name, utid, depth, total_case_dur, bounds_s, parent_id=None):
-        s_metrics = self._get_node_metrics_by_id(self._common_api.tp_s, utid, slice_id, bounds_s[0], bounds_s[1])
-        delta = round(s_metrics['dur'], 1)
+        if slice_id is None: return None
+
+        m = self._get_node_metrics_by_id(self._common_api.tp_s, utid, slice_id, bounds_s[0], bounds_s[1])
+        delta = m['dur']
         if delta <= 0: return None
-        
-        self_val = round(s_metrics['self'], 1)
-        wait_val = round(s_metrics['wait'], 1)
-        
-        # 자식들의 Delta 합계 계산
+
+        # Ghost Gap 계산 (자식 합산)
         query = f"SELECT id, dur FROM slice WHERE parent_id = {slice_id}"
         c_res = self._common_api.tp_s.query(query).as_pandas_dataframe()
-        children_sum_delta = (c_res['dur'].sum() or 0) / 1e6
+        children_sum = (c_res['dur'].sum() or 0) / 1e6
+        g_gap = round(max(0, delta - children_sum - m['self']), 1)
 
-        # Ghost Gap 계산
-        g_gap = round(max(0, delta - children_sum_delta - self_val), 1)
-        impact_ratio = round(delta / total_case_dur, 3) if total_case_dur > 0 else 0
-
+        # 기존 summarize_investigation 키 이름을 유지하여 호환성 확보
         return {
             "slice_id": int(slice_id),
             "parent_id": int(parent_id) if parent_id is not None else None,
             "name": name,
             "depth": depth,
             "delta_time": delta, 
-            "self_time": self_val,
-            "wait_time": wait_val,
+            "self_time": m['self'],
+            "wait_time": m['wait'],
             "ghost_gap": g_gap,
-            "children_sum_delta": round(children_sum_delta, 1),
-            "impact_ratio": impact_ratio,
+            "physical_stats": { # AI용 보너스 데이터
+                "io_wait_ms": m['io_ms'],
+                "runnable_ms": m['runnable_ms'],
+                "mutex_wait_ms": m['mutex_ms'],
+                "cpu": m['cpu']
+            },
+            "impact_ratio": round(delta / total_case_dur, 3) if total_case_dur > 0 else 0,
             "is_leaf": (len(c_res) == 0)
         }
-
-    def _trace_inheritance_recursive(self, parent_info, utid, depth, max_depth, total_case_dur, bounds_s, out_list):
-        if depth > max_depth: return
-
-        children_df = self._get_structural_children(self._common_api.tp_s, parent_info['slice_id'])
-        
-        if children_df.empty:
-            out_list.append(parent_info); return
-
-        total_children_delta = children_df['dur'].sum() / 1e6
-        
-        # [수정] bindApplication 같은 거대 노드를 위한 특수 로직
-        # 자식들의 합이 부모 지연의 일정 수준 이상이면 무조건 1등 자식을 파고듭니다.
-        if total_children_delta >= (parent_info['delta_time'] * self.INHERITANCE_THRESHOLD):
-            top_child_row = children_df.iloc[0] # 가장 긴 자식
-            top_child_info = self._get_processed_node_data(
-                top_child_row['id'], top_child_row['name'], utid, depth, 
-                total_case_dur, bounds_s, parent_id=parent_info['slice_id']
-            )
-
-            # 1등 자식이 독보적이지 않아도(Spamming), 일단 리스트에는 추가하여 AI가 판단하게 함
-            if top_child_info:
-                # 자식 노드 추가
-                out_list.append(top_child_info)
-                # 더 깊이 내려가기
-                self._trace_inheritance_recursive(top_child_info, utid, depth + 1, max_depth, total_case_dur, bounds_s, out_list)
-        else:
-            # 상속되지 않는 지연(현재 노드 자체의 문제)일 경우 멈춤
-            out_list.append(parent_info)
-
-    def _get_node_metrics_by_id(self, tp, utid, slice_id, start_ts, end_ts):
-        """커널 스레드 상태를 분석하여 실제 Running/Wait 시간을 분리합니다."""
-        query = f"SELECT ts, dur FROM slice WHERE id = {slice_id}"
-        res = tp.query(query).as_pandas_dataframe()
-        if res.empty: return {'dur': 0, 'self': 0, 'wait': 0}
-        
-        s_ts, s_dur = res.iloc[0]['ts'], res.iloc[0]['dur']
-        a_start, a_end = max(s_ts, start_ts), min(s_ts + s_dur, end_ts)
-        a_dur_ns = max(0, a_end - a_start)
-
-        if a_dur_ns <= 0: return {'dur': 0, 'self': 0, 'wait': 0}
-
-        st_query = f"""
-            SELECT state, SUM(CASE 
-                WHEN ts < {a_start} THEN ts + dur - {a_start}
-                WHEN ts + dur > {a_end} THEN {a_end} - ts
-                ELSE dur END) as clipped_ns
-            FROM thread_state WHERE utid = {utid} AND ts + dur > {a_start} AND ts < {a_end} GROUP BY 1
-        """
-        st_res = tp.query(st_query).as_pandas_dataframe()
-        running_ms = st_res[st_res['state'].isin(['Running', 'Run'])]['clipped_ns'].sum() / 1e6
-        wait_ms = st_res[st_res['state'].isin(['R', 'D', 'DK', 'S'])]['clipped_ns'].sum() / 1e6
-        
-        return {'dur': round(a_dur_ns / 1e6, 2), 'self': round(running_ms, 2), 'wait': round(wait_ms, 2)}
-
-    def _get_structural_children(self, tp, parent_id):
-        return tp.query(f"SELECT id, name, ts, dur FROM slice WHERE parent_id = {parent_id} ORDER BY dur DESC").as_pandas_dataframe()
 
     def _build_recursive_node_pro(self, slice_id, name, utid, depth, max_depth, total_case_dur, bounds_s, parent_id=None):
         node_info = self._get_processed_node_data(slice_id, name, utid, depth, total_case_dur, bounds_s, parent_id)
         if not node_info or depth > max_depth: return None
 
         node_data = {**node_info, "children": []}
-        
-        # 1. 모든 자식 로드
         children_df = self._get_structural_children(self._common_api.tp_s, slice_id)
-        if children_df.empty:
-            return node_data
+        if children_df.empty: return node_data
 
-        # ---------------------------------------------------------
-        # ⚖️ [Balanced Mode] 전략적 가지치기
-        # ---------------------------------------------------------
-        # 조건 1: 부모 지연의 5% 이상 (상대적 중요도)
-        # 조건 2: 혹은 절대 시간이 5.0ms 이상 (절대적 중요도 - 16ms 프레임의 약 1/3)
-        relative_threshold = node_info['delta_time'] * 0.05
-        absolute_floor = 5.0 
-
-        mask = (children_df['dur'] / 1e6 >= relative_threshold) | (children_df['dur'] / 1e6 >= absolute_floor)
+        # [Aggressive Pruning] 수사관님의 요청대로 가지치기 강화
+        rel_threshold = node_info['delta_time'] * 0.10
+        abs_threshold = 8.0 
         
-        # 필터링 후 상위 5개만 최종 선별
-        significant_children = children_df[mask].head(5)
-        
-        # 2. 통계적 정합성 확보 (기타 슬라이스 합산)
-        all_children_sum = children_df['dur'].sum() / 1e6
-        top_children_sum = significant_children['dur'].sum() / 1e6
-        others_delta = round(max(0, all_children_sum - top_children_sum), 1)
+        mask = (children_df['dur'] / 1e6 >= rel_threshold) | (children_df['dur'] / 1e6 >= abs_threshold)
+        significant_children = children_df[mask].head(3) # Top 3만
 
-        # 3. 선별된 핵심 용의자들만 재귀 탐색
+        others_delta = round(max(0, (children_df['dur'].sum() / 1e6) - (significant_children['dur'].sum() / 1e6)), 1)
+
         for _, child in significant_children.iterrows():
-            child_node = self._build_recursive_node_pro(
-                child['id'], child['name'], utid, depth + 1, 
-                max_depth, total_case_dur, bounds_s, parent_id=slice_id
-            )
-            if child_node: 
-                node_data["children"].append(child_node)
+            child_node = self._build_recursive_node_pro(child['id'], child['name'], utid, depth + 1, max_depth, total_case_dur, bounds_s, parent_id=slice_id)
+            if child_node: node_data["children"].append(child_node)
 
-        # 4. AI를 위한 상황 요약 노드 추가
         if others_delta > 1.0:
-            node_data["children"].append({
-                "name": "Sum_of_Minor_Slices_Filtered",
-                "delta_time": others_delta,
-                "is_leaf": True,
-                "note": f"Filtered by Balance Mode (Rel < {relative_threshold:.1f}ms & Abs < {absolute_floor}ms)"
-            })
+            node_data["children"].append({"name": "Minor_Slices_Sum", "delta_time": others_delta, "is_leaf": True})
             
         return node_data
 
+    def _trace_inheritance_recursive(self, parent_info, utid, depth, max_depth, total_case_dur, bounds_s, out_list):
+        if depth > max_depth: return
+        children_df = self._get_structural_children(self._common_api.tp_s, parent_info['slice_id'])
+        if children_df.empty:
+            out_list.append(parent_info); return
+        
+        if (children_df['dur'].sum() / 1e6) >= (parent_info['delta_time'] * self.INHERITANCE_THRESHOLD):
+            top_child = children_df.iloc[0]
+            top_info = self._get_processed_node_data(top_child['id'], top_child['name'], utid, depth, total_case_dur, bounds_s, parent_id=parent_info['slice_id'])
+            if top_info:
+                out_list.append(top_info)
+                self._trace_inheritance_recursive(top_info, utid, depth + 1, max_depth, total_case_dur, bounds_s, out_list)
+        else:
+            out_list.append(parent_info)
+
+    def _get_structural_children(self, tp, parent_id):
+        return tp.query(f"SELECT id, name, ts, dur FROM slice WHERE parent_id = {parent_id} ORDER BY dur DESC").as_pandas_dataframe()
+
+    # ---------------------------------------------------------
+    # ⚠️ 사용자의 요청: 내용을 절대 변경하지 않음
+    # ---------------------------------------------------------
     def summarize_investigation(self, app_package, selected_milestone_info, flat_data, full_data):
         candidates = flat_data.get("candidates", [])
         if not candidates:
             return None
 
         # 1. 기준점 설정 (마일스톤 전체 지연)
-        # investigation_context에 total_delta가 저장되어 있다고 가정합니다.
         range_name = f"{selected_milestone_info['start_name']} ~ {selected_milestone_info['end_name']}"
         milestone_delay = selected_milestone_info["total_delay_ms"]
 
@@ -212,15 +198,13 @@ class InsightScanDataDelegate:
         root_node = candidates[0] # 첫 번째 후보가 항상 루트(발원지)
 
         # 2. 죄목별 합산 (고유 지연량 합산)
-        # Self와 Ghost는 각 노드에서 발생한 고유 지연이므로 모두 더합니다.
         total_self = sum(c.get('self_time', 0) for c in candidates)
         total_ghost = sum(c.get('ghost_gap', 0) for c in candidates)
-        
+
         # Wait는 루트의 Wait가 전체 지연의 천장(Limit)입니다.
         total_wait = root_node.get('wait_time', 0)
 
         # 3. 은닉된 대기(Hidden Wait) 산출
-        # 루트가 기다린 시간 중 자식들의 대기 시간으로 설명되지 않는 공백
         children_wait_sum = sum(c.get('wait_time', 0) for c in candidates[1:])
         hidden_wait = round(max(0, total_wait - children_wait_sum), 1)
 
@@ -242,7 +226,7 @@ class InsightScanDataDelegate:
                 "total_delay_delta_ms": round(milestone_delay, 1),
                 "investigation_date": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             },
-            
+
             "final_verdict": {
                 "comment": "책임 소재 판결 및 지연 요약",
                 "responsibility_ratio": {
@@ -257,9 +241,6 @@ class InsightScanDataDelegate:
                 }
             },
 
-            # 요약된 용의자 명단 (Flat Tree 결과물)
             "prime_suspects_flat": candidates,
-
-            # 리얼 전수조사 증거물 (Full Tree 전체 구조)
             "evidence_room_full_tree": full_data
         }

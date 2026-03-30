@@ -49,6 +49,8 @@ class ExecutorThread(threading.Thread):
         finished_callback=None,
         start_m_index=0,
         end_m_index=0,
+        model_name=None,
+        mode="Fast Analysis",
     ):
         super().__init__(daemon=True)
         self.engine = engine
@@ -57,6 +59,8 @@ class ExecutorThread(threading.Thread):
         self.finished_callback = finished_callback
         self.start_m_index = start_m_index
         self.end_m_index = end_m_index
+        self.model_name = model_name
+        self.mode = mode
         self.results: list[str] = []
         atexit.register(self.stop)
         self._stop_event = threading.Event()
@@ -91,7 +95,9 @@ class ExecutorThread(threading.Thread):
             self.engine.run(
                 output_callback=cb,
                 start_m_index=self.start_m_index,
-                end_m_index=self.end_m_index
+                end_m_index=self.end_m_index,
+                model_name=self.model_name,
+                mode=self.mode
             )
         finally:
             pass
@@ -222,26 +228,31 @@ class TraceGui(ctk.CTk):
         threading.Thread(target=self._initialize_executor, daemon=True).start()
 
     def _initialize_executor(self):
+        # Disable all inputs during startup
+        self.after(0, lambda: self._set_sidebar_state("disabled"))
+        
         time.sleep(3)
 
         self.engine.start(
             output_callback=self._append_line,
             range_callback=self.set_range_data
         )
-        
-        # 설치된 모델 목록 가져와서 콤보박스 업데이트
-        try:
-            models = self.engine.llm_requester.get_installed_models()
-            if models:
-                self.after(0, lambda: self.model_combo.configure(values=models))
-                # 현재 선택된 모델이 목록에 있으면 유지, 없으면 첫 번째 모델 선택
-                current = self.model_combo.get()
-                if current not in models:
-                    self.after(0, lambda: self.model_combo.set(models[0]))
-        except Exception as e:
-            print(f"⚠️ 모델 목록 업데이트 실패: {e}")
 
         self.after(0, lambda: self.status_label.configure(text="✅ System Ready"))
+        self.after(0, lambda: self._set_sidebar_state("normal"))
+
+    def _set_sidebar_state(self, state: str):
+        """Enable or disable sidebar configuration controls."""
+        widgets = [
+            self.package_edit, self.client_combo, self.model_combo, self.api_key_edit,
+            self.btn_load_data, self.mode_combo, self.normal_edit, self.btn_n,
+            self.slow_edit, self.btn_s, self.btn_restart
+        ]
+        for w in widgets:
+            try:
+                w.configure(state=state)
+            except:
+                pass
 
     def _build_ui(self):
         # --- Sidebar ---
@@ -761,9 +772,26 @@ class TraceGui(ctk.CTk):
         self.status_label.configure(text="⏳ Loading Data...")
 
         def load_task():
+            nonlocal model
             try:
+                # AI 클라이언트 초기화 및 설치된 모델 목록 가져와서 콤보박스 업데이트
+                try:
+                    self.engine.llm_requester.init_client(client_type)
+                    if api_key:
+                        self.engine.llm_requester.set_api_key(api_key)
+                    
+                    models = self.engine.llm_requester.get_installed_models()
+                    if models:
+                        self.after(0, lambda m=models: self.model_combo.configure(values=m))
+                        # 현재 선택된 모델이 목록에 없거나 기본값이면 첫 번째 모델 선택
+                        if model == "model" or model not in models:
+                            model = models[0]
+                            self.after(0, lambda m=model: self.model_combo.set(m))
+                except Exception as e:
+                    print(f"⚠️ 모델 목록 업데이트 실패: {e}")
+
                 # Call engine.load to initialize data and servers
-                self.engine.load(normal, slow, target_pkg, model, mode, client_type=client_type, api_key=api_key)
+                self.engine.load(normal, slow, target_pkg, client_type=client_type, api_key=api_key)
                 
                 # Update GUI on the main thread after successful load
                 self.after(0, self._on_load_success)
@@ -780,16 +808,18 @@ class TraceGui(ctk.CTk):
         self.start_slider.configure(state="normal")
         self.end_slider.configure(state="normal")
         
-        # Disable all configuration inputs after successful load to lock the session context
+        # Disable configuration inputs but keep model and mode enabled for selection
         self.package_edit.configure(state="disabled")
         self.client_combo.configure(state="disabled")
-        self.model_combo.configure(state="disabled")
         self.api_key_edit.configure(state="disabled")
-        self.mode_combo.configure(state="disabled")
         self.normal_edit.configure(state="disabled")
         self.btn_n.configure(state="disabled")
         self.slow_edit.configure(state="disabled")
         self.btn_s.configure(state="disabled")
+        
+        # Explicitly enable model and mode for selection after load
+        self.model_combo.configure(state="normal")
+        self.mode_combo.configure(state="normal")
         
         self.status_label.configure(text="📦 Data Loaded - Ready")
         messagebox.showinfo("Load Data", f"Trace data loaded successfully. Analysis tools are now enabled.\n\nSettings are locked for this session. Use 'RESTART SYSTEM' to load different traces.")
@@ -818,6 +848,7 @@ class TraceGui(ctk.CTk):
         self.btn_n.configure(state="disabled")
         self.slow_edit.configure(state="disabled")
         self.btn_s.configure(state="disabled")
+        self.btn_restart.configure(state="disabled")
 
         # Preserve existing logs and add a separator if not empty
         for widget, title in [(self.text_edit, "AI ANALYSIS SESSION"), (self.system_edit, "SYSTEM LOG SESSION")]:
@@ -829,6 +860,9 @@ class TraceGui(ctk.CTk):
 
         self.realtime_status.configure(text="")  # Clear status on new run
 
+        model = self.model_combo.get().strip()
+        mode = self.mode_combo.get().strip()
+
         self.thread = ExecutorThread(
             engine=self.engine,
             progress_callback=self._append_line,
@@ -836,17 +870,18 @@ class TraceGui(ctk.CTk):
             finished_callback=self._on_finished,
             start_m_index=int(self.start_slider.get()),
             end_m_index=int(self.end_slider.get()),
+            model_name=model,
+            mode=mode,
         )
         self.thread.start()
 
     def _on_client_change(self, client_type):
-        """Update the model list when the client is switched."""
+        """Update the client and reset model list."""
         try:
-            self.engine.llm_requester.set_client(client_type)
-            models = self.engine.llm_requester.get_installed_models()
-            if models:
-                self.model_combo.configure(values=models)
-                self.model_combo.set(models[0])
+            self.engine.llm_requester.init_client(client_type)
+            # 클라이언트 바뀔 때 모델 목록 초기화
+            self.model_combo.configure(values=["empty"])
+            self.model_combo.set("model")
             
             # Key show/hide depending on client
             if client_type == "ollama":
@@ -896,10 +931,13 @@ class TraceGui(ctk.CTk):
         def finalize():
             self.status_label.configure(text="🏁 Analysis Complete")
             
-            # Re-enable only analysis controls (Config remains locked)
+            # Re-enable analysis and selection controls (Config remains locked)
             self.run_button.configure(state="normal")
             self.start_slider.configure(state="normal")
             self.end_slider.configure(state="normal")
+            self.model_combo.configure(state="normal")
+            self.mode_combo.configure(state="normal")
+            self.btn_restart.configure(state="normal")
             
             messagebox.showinfo("Done", "Analysis finished. Logs have been preserved. You can run another analysis or load new data.")
 

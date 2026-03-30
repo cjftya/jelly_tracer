@@ -3,8 +3,10 @@ from llm_client.ollama_manager import OllamaManager
 
 class LLMRequester:
     def __init__(self):
-        self.client_type = "google_studio"
-        self.client = self.create_client(self.client_type)
+        self.client_type = None
+        self.ollama_manager = OllamaManager()
+        self.google_studio_manager = GoogleStudioManager()
+        self.client = None
         self.chunk_count = [0]
 
         self.chunck_spinner = [
@@ -89,28 +91,35 @@ class LLMRequester:
             
         self.chunk_count[0] += 1
 
-    def create_client(self, client_type):
+    def init_client(self, client_type):
+        if self.client_type == client_type:
+            return
+            
+        self.client_type = client_type
         if client_type == "ollama":
-            return OllamaManager()
+            self.client = self.ollama_manager
         elif client_type == "google_studio":
-            return GoogleStudioManager()
+            self.client = self.google_studio_manager
 
     def request(self, context, model=None, options=None, chunk_callback=None):
         return self.client.request(context, model, options, chunk_callback)
 
-    def start_engine(self):
-        self.client.start_engine()
+    def start_engine(self, full=False):
+        if full:
+            self.ollama_manager.start_engine()
+            self.google_studio_manager.start_engine()
+        else:
+            self.client.start_engine()
 
-    def stop_engine(self):
-        self.client.stop_engine()
+    def stop_engine(self, full=False):
+        if full:
+            self.ollama_manager.stop_engine()
+            self.google_studio_manager.stop_engine()
+        else:
+            self.client.stop_engine()
 
     def get_installed_models(self):
         return self.client.get_installed_models()
-
-    def set_client(self, client_type):
-        if self.client_type != client_type:
-            self.client_type = client_type
-            self.client = self.create_client(self.client_type)
 
     def set_model_name(self, model_name):
         self.client.set_model_name(model_name)

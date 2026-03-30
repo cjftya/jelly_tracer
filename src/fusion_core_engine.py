@@ -29,11 +29,10 @@ class FusionCoreEngine:
         self.llm_requester = llm_requester
         self.range_callback = range_callback
 
-    def load(self, trace_normal, trace_slow, target_package, mode="Fast Analysis"):
+    def load(self, trace_normal, trace_slow, target_package):
         self.trace_normal = trace_normal
         self.trace_slow = trace_slow
         self.target_package = target_package
-        self.mode = mode
         self.common_api = CommonAPI(trace_normal, trace_slow, target_package)
         
         self.point_scanner.start(self.common_api, self.target_package, self.llm_requester, self.output_callback)
@@ -41,14 +40,15 @@ class FusionCoreEngine:
         if self.range_callback:
             self.range_callback(self.point_scanner.milestone_names)
 
+    def run(self, output_callback=None, start_m_index=0, end_m_index=0, mode=None):
+        if output_callback:
+            self.output_callback = output_callback
+        
+        self.mode = mode
         if self.is_fast_analysis():
             self.fast_analysis.start(self.common_api, self.target_package, self.llm_requester, self.output_callback)
         elif self.is_deep_analysis():
             self.deep_analysis.start(self.common_api, self.target_package, self.llm_requester, self.output_callback)
-
-    def run(self, output_callback=None, start_m_index=0, end_m_index=0):
-        if output_callback:
-            self.output_callback = output_callback
         
         self.point_scanner.milestone_start_index = start_m_index
         self.point_scanner.milestone_end_index = end_m_index

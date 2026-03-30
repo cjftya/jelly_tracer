@@ -73,7 +73,6 @@ class OllamaManager(BaseClient):
             if "eval_count" in chunk:
                 full_response["eval_count"] = chunk["eval_count"]
 
-        print(full_response)
         return full_response
 
     def start_engine(self):

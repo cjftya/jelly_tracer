@@ -14,34 +14,54 @@ class DeepAnalysis:
         # 시스템 프롬프트 템플릿 (계산된 비율이 주입될 자리: {app_ratio}, {sys_ratio})
         self.system_prompt_template = """
 ### [Role]
-You are a Senior Android Performance Forensic Expert. Your mission is to provide a definitive verdict based on the provided calculated ratios.
+You are the "Chief Android System Performance Forensic Inspector". 
+Your mission is to synthesize multiple incident reports into a "Supreme Verdict" using MRI-enriched data.
 
-### [Provided Statistical Data]
-- Calculated Responsibility: App {app_ratio}% vs System {sys_ratio}%
-- These ratios are calculated based on physical Self-time and Wait-time. Do not recalculate. Explain WHY these ratios occurred.
+### [Statistical Constraints]
+- **Fixed Ratios**: App {app_ratio}% vs System {sys_ratio}%.
+- **Instruction**: These are calculated based on physical metrics (Self vs Wait). Your goal is to justify these ratios using the provided trace evidence.
 
-### [Instructions: Multi-Step Reasoning Protocol]
-You MUST start your response with a `[[THOUGHT]]` block in English. Follow these steps:
-1. **Metric Fact-Check**: Compare 'incident_meta' with 'ai_summary'. 
-2. **Deep Trace Investigation**: Scan 'flat_tree' down to the leaf node (Level 8+).
-3. **Ownership Attribution**: Explain how the provided {app_ratio}% vs {sys_ratio}% reflects the method calls found in the traces.
-4. **Pattern Synthesis**: Analyze all cases collectively for repeating bottlenecks.
-5. **Verdict Finalization**: Summarize before closing [[/THOUGHT]].
+### [Instructions: Organic CoT Protocol]
+Inside the `[[THOUGHT]]` block, you MUST perform:
 
-### [Decision Logic]
-- APP: High self_time, UI inflation, heavy SDK init, JSON parsing.
-- SYSTEM: High wait_time, Kernel/Binder calls (f2fs, binder, mutex), I/O contention.
+1. **[MRI Cross-Check]**: 
+   - Aggregate `io_wait_ms`, `mutex_wait_ms`, and `runnable_ms` across ALL incidents. 
+   - Does the total `io_wait` explain the {sys_ratio}%? (Physical Grounding).
 
-### [Output Template]
+2. **[Timeline Synthesis]**: 
+   - Analyze the progression from Case 1 to Case N. 
+   - Is there a "Chain Reaction"? (e.g., High I/O in Case 1 causing scheduling delay in Case 2).
+
+3. **[Pattern Detection]**: 
+   - Identify "Common Enemies": Recurring method names or system calls across different incidents.
+   - Look for "Spamming": Many small slices (Minor_Slices_Sum) indicating fragmented logic.
+
+4. **[Responsibility Mapping]**: 
+   - Connect {app_ratio}% to App-side logic (Inflation, SDK init, heavy loops).
+   - Connect {sys_ratio}% to Kernel/Hardware states (Storage I/O, Lock contention, CPU migration).
+
+5. **[Final Technical Theory]**: Summarize the root cause of the entire milestone delay.
+
+### [Output Template: Supreme Verdict]
 [[THOUGHT]]
-(Step-by-step reasoning in English)
+(Detailed forensic reasoning in English)
 [[/THOUGHT]]
 
-1. ⚖️ **최종 심층 판결**: (제시된 App {app_ratio}% vs System {sys_ratio}% 비율을 바탕으로 한 수사 총평)
-2. 🕵️ **사건별 핵심 검거**: (치명적인 범인들과 물리적 증거 요약)
-3. 📉 **공통 병목 패턴**: (구조적 결함 분석)
-4. 🛠️ **수사관의 기술 권고**: (즉각적인 Action Item)
-5. 🎯 **판결 신뢰도**: (Confidence Score % 및 근거)
+1. ⚖️ **최종 심층 판결 (Supreme Verdict)**
+   - (제시된 {app_ratio}% vs {sys_ratio}% 비율의 정당성을 MRI 지표를 근거로 선언)
+
+2. 🕵️ **사건별 핵심 물증 (Evidence Summary)**
+   - (각 Case별로 어떤 물리적 지표(I/O, Mutex 등)가 결정적이었는지 핵심 노드 ID와 함께 요약)
+
+3. 📉 **구조적 병목 패턴 (Systemic Defect)**
+   - (여러 사건에서 공통적으로 발견된 구조적 문제점 - 예: "초기 로딩 시 UFS 대역폭 포화", "특정 싱글톤 객체의 Lock 경합")
+
+4. 🛠️ **수사관의 기술 권고 (Actionable Advice)**
+   - **[App Team]**: (로직 수정, Lazy Loading, 락 범위 축소 등)
+   - **[System/Kernel Team]**: (I/O 우선순위 조정, 스케줄링 정책 점검 등)
+
+5. 🎯 **판결 신뢰도 및 근거**
+   - (Confidence Score % 및 데이터 정합성(Ghost Gap 0 여부 등)에 근거한 확신 수준)
         """
 
     def start(self, common_api, target_package, llm_requester, output_callback):
@@ -53,6 +73,10 @@ You MUST start your response with a `[[THOUGHT]]` block in English. Follow these
     def run(self, collected_data, output_callback):
         incidents = collected_data.get("incidents", [])
         milestone_context = collected_data.get("milestone_info", {})
+        captured_delay_ms = collected_data.get("captured_delay_ms", 0)
+        overlap_factor = collected_data.get("overlap_factor", 0)
+        coverage_efficiency = collected_data.get("coverage_efficiency", 0)
+        concurrency_mode = collected_data.get("concurrency_mode", 0)
         incidents_result_data = []
 
         if incidents:
@@ -74,11 +98,16 @@ You MUST start your response with a `[[THOUGHT]]` block in English. Follow these
                     summary_context = final_result[0]
                     ai_analyst_text = final_result[3]
                     flat_tree = summary_context.get("prime_suspects_flat", [])
+
+                    if not flat_tree: continue
+                    root = flat_tree[0] # 루트 노드
                     
+                    # 단순 수치만 가져오지 않고, V4.2의 핵심 'physical_stats'를 통째로 가져옵니다.
                     incident_meta = {
-                        "delta_time": flat_tree[0].get("delta_time", 0) if flat_tree else 0,
-                        "self_time": flat_tree[0].get("self_time", 0) if flat_tree else 0,
-                        "wait_time": flat_tree[0].get("wait_time", 0) if flat_tree else 0
+                        "delta_ms": root.get("delta_time", 0),
+                        "self_ms": root.get("self_time", 0),
+                        "wait_ms": root.get("wait_time", 0),
+                        "mri_stats": root.get("physical_stats", {})
                     }
 
                     incidents_result_data.append({
@@ -108,10 +137,14 @@ You MUST start your response with a `[[THOUGHT]]` block in English. Follow these
             request_context = {
                 "metadata": {
                     "app_name": self.target_package,
-                    "milestone_range": range_name,
+                    "milestone_range": range_name,  
                     "calculated_ratios": {"app": f"{app_ratio}%", "system": f"{sys_ratio}%"},
                     "total_delay_delta_ms": round(milestone_context["total_delay_ms"], 1),
-                    "investigation_date": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    "investigation_date": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "captured_delay_ms": captured_delay_ms,
+                    "coverage_efficiency": coverage_efficiency,
+                    "overlap_factor": overlap_factor,
+                    "concurrency_mode": concurrency_mode
                 },
                 "incidents": incidents_result_data
             }
@@ -125,8 +158,6 @@ You MUST start your response with a `[[THOUGHT]]` block in English. Follow these
 
             full_response_text = self.request_analysis(ai_context)
 
-            Logger.log(f"DeepAnalysis response\n{full_response_text}")
-            
             # 파싱 로직
             thought_match = re.search(r'\[\[THOUGHT\]\](.*?)\[\[/THOUGHT\]\]', full_response_text, re.DOTALL)
             ai_thought = thought_match.group(1).strip() if thought_match else "내적 추론을 찾을 수 없습니다."
@@ -137,7 +168,7 @@ You MUST start your response with a `[[THOUGHT]]` block in English. Follow these
 
             investigation_report = {
                 "milestone_context": milestone_context,
-                "final_ai_summary": final_summary,   
+                "final_ai_summary": final_summary,
                 "raw_data": incidents_result_data 
             }
             self.generate_final_report(investigation_report)

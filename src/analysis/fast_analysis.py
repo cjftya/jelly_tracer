@@ -20,7 +20,6 @@ class FastAnalysis:
 
             self.insight_scanner.collected_data = primary_incident_data
             final_result = self.insight_scanner.run(output_callback=output_callback)
-            # Logger.log(f"FastAnalysis response\n{final_result}")
 
             if final_result:
                 summary_context = final_result[0]
