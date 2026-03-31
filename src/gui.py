@@ -1,23 +1,29 @@
 import atexit
-import io
 import sys
 import threading
 import time
 import tkinter as tk
-from io import BytesIO
-from pilmoji.source import BaseSource
-from pathlib import Path
-from tkinter import filedialog, messagebox
-
+from tkinter import messagebox, filedialog
 import customtkinter as ctk
-try:
-    from PIL import Image, ImageDraw, ImageFont
-    from pilmoji import Pilmoji
-    HAS_PILMOJI = True
-except ImportError:
-    HAS_PILMOJI = False
+
+import platform
 
 from engine import Engine
+
+# Cross-platform font configuration
+SYSTEM = platform.system()
+if SYSTEM == "Windows":
+    UI_FONT = "Segoe UI"
+    EMOJI_FONT = "Segoe UI Emoji"
+    MONO_FONT = "Consolas"
+elif SYSTEM == "Darwin":  # macOS
+    UI_FONT = "Helvetica Neue"
+    EMOJI_FONT = "Apple Color Emoji"
+    MONO_FONT = "Menlo"
+else:  # Linux or others
+    UI_FONT = "DejaVu Sans"
+    EMOJI_FONT = "Noto Color Emoji"
+    MONO_FONT = "DejaVu Sans Mono"
 
 
 class ConsoleRedirector:
@@ -108,92 +114,6 @@ class ExecutorThread(threading.Thread):
         # 낱개 쓰레드 중단 시 Executor를 끄지 않음
         self._stop_event.set()
 
-class LocalTwemojiSource(BaseSource):
-    def __init__(self, emoji_dir: str = "./assets"):
-        self.emoji_dir = Path(emoji_dir)
-
-    def _to_code(self, emoji: str) -> str:
-        codepoints = [f"{ord(c):x}" for c in emoji if ord(c) != 0xfe0f]
-        return "-".join(codepoints)
-
-    def get_emoji(self, emoji: str) -> BytesIO | None:  # ← bytes 아니고 BytesIO
-        code = self._to_code(emoji)
-        path = self.emoji_dir / f"{code}.png"
-
-        if not path.exists():
-            # fe0f 포함 버전도 시도
-            code_full = "-".join(f"{ord(c):x}" for c in emoji)
-            path = self.emoji_dir / f"{code_full}.png"
-
-        if path.exists():
-            return BytesIO(path.read_bytes())  # ← 여기가 핵심
-
-        print(f"[MISS] {emoji} → {code}.png")
-        return None
-
-    def get_discord_emoji(self, id: int) -> BytesIO | None:
-        return None
-
-    def request(self, url: str, **kwargs):
-        raise RuntimeError(f"네트워크 차단: {url}")
-
-class CTkPilmojiLabel(ctk.CTkLabel):
-    """Render colored emojis using pilmoji inside a CTkLabel (via CTkImage)."""
-    def __init__(self, master, font_size=15, font_path="C:\\Windows\\Fonts\\malgunbd.ttf", **kwargs):
-        self._font_size = font_size
-        self._font_path = font_path
-        self._text_color = kwargs.get("text_color", "#D0D0D0")
-        self._original_text = kwargs.get("text", "")
-        self._source = LocalTwemojiSource()
-        # Suppress standard text rendering
-        kwargs["text"] = ""
-        super().__init__(master, **kwargs)
-        
-        if self._original_text:
-            self.set_text(self._original_text)
-
-    def set_text(self, text: str):
-        self._original_text = text
-        if not HAS_PILMOJI:
-            self.configure(text=text)
-            return
-
-        try:
-            font = ImageFont.truetype(self._font_path, self._font_size)
-        except Exception:
-            try:
-                font = ImageFont.truetype("C:\\Windows\\Fonts\\malgunbd.ttf", self._font_size)
-            except Exception:
-                font = ImageFont.load_default()
-
-        # Measurement using dummy image
-        dummy = Image.new("RGBA", (1, 1), (0, 0, 0, 0))
-        with Pilmoji(dummy, source=self._source) as pilmoji:
-            w, h = pilmoji.getsize(text, font=font)
-            # Add some padding
-            w = int(w) + 10
-            h = int(h) + 15
-
-        # Render RGBA image with transparent background
-        img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
-        with Pilmoji(img, source=self._source) as pilmoji:
-            # Draw with the exact text_color
-            pilmoji.text((0, 5), text, font=font, fill=self._get_current_color())
-
-        # Create and set CTkImage
-        ctk_img = ctk.CTkImage(light_image=img, dark_image=img, size=(w, h))
-        self.configure(image=ctk_img)
-
-    def _get_current_color(self):
-        color = self.cget("text_color")
-        return color if color else self._text_color
-
-    def configure(self, **kwargs):
-        # Intercept text updates
-        if "text" in kwargs:
-            text = kwargs.pop("text")
-            self.set_text(text)
-        super().configure(**kwargs)
 
 
 class TraceGui(ctk.CTk):
@@ -265,10 +185,10 @@ class TraceGui(ctk.CTk):
         self.sidebar_frame.grid_columnconfigure(0, weight=1)
 
         # Trace Settings Group
-        self.settings_label = CTkPilmojiLabel(
+        self.settings_label = ctk.CTkLabel(
             self.sidebar_frame,
             text="⚙️ CONFIGURATION",
-            font_size=13,
+            font=ctk.CTkFont(size=13, weight="bold"),
             text_color="#FFFFFF",
             anchor="w",
         )
@@ -286,10 +206,10 @@ class TraceGui(ctk.CTk):
         self.package_edit.insert(0, "com.sec.android.gallery3d")
         self.package_edit.grid(row=1, column=0, padx=25, pady=10, sticky="ew")
 
-        self.client_label = CTkPilmojiLabel(
+        self.client_label = ctk.CTkLabel(
             self.sidebar_frame,
             text="📡 AI CLIENT",
-            font_size=12,
+            font=ctk.CTkFont(size=12, weight="bold"),
             text_color="#94A3B8",
             anchor="w",
         )
@@ -310,10 +230,10 @@ class TraceGui(ctk.CTk):
         self.client_combo.set("google_studio")
         self.client_combo.grid(row=3, column=0, padx=25, pady=(0, 10), sticky="ew")
 
-        self.model_label = CTkPilmojiLabel(
+        self.model_label = ctk.CTkLabel(
             self.sidebar_frame,
             text="🤖 AI MODEL",
-            font_size=12,
+            font=ctk.CTkFont(size=12, weight="bold"),
             text_color="#94A3B8",
             anchor="w",
         )
@@ -333,10 +253,10 @@ class TraceGui(ctk.CTk):
         self.model_combo.set("model")
         self.model_combo.grid(row=5, column=0, padx=25, pady=(0, 10), sticky="ew")
 
-        self.api_key_label = CTkPilmojiLabel(
+        self.api_key_label = ctk.CTkLabel(
             self.sidebar_frame,
             text="🔑 API KEY",
-            font_size=12,
+            font=ctk.CTkFont(size=12, weight="bold"),
             text_color="#94A3B8",
             anchor="w",
         )
@@ -349,7 +269,7 @@ class TraceGui(ctk.CTk):
             border_width=0,
             fg_color="#0D1117",
             corner_radius=4,
-            font=ctk.CTkFont(family="Consolas", size=12),
+            font=ctk.CTkFont(family=MONO_FONT, size=12),
             show="*"
         )
         self.api_key_edit.grid(row=7, column=0, padx=25, pady=(0, 15), sticky="ew")
@@ -369,10 +289,10 @@ class TraceGui(ctk.CTk):
         self.btn_load_data.grid(row=8, column=0, padx=25, pady=(20, 10), sticky="ew")
 
         # Range Selection
-        self.range_label = CTkPilmojiLabel(
+        self.range_label = ctk.CTkLabel(
             self.sidebar_frame,
             text="📏 SCAN RANGE",
-            font_size=12,
+            font=ctk.CTkFont(size=12, weight="bold"),
             text_color="#94A3B8",
             anchor="w",
         )
@@ -393,7 +313,7 @@ class TraceGui(ctk.CTk):
         self.start_slider.set(0)
         self.start_slider.grid(row=0, column=0, sticky="ew", pady=(5, 0))
         self.start_val_label = ctk.CTkLabel(
-            self.range_frame, text="Start: -", font=ctk.CTkFont(family="Segoe UI Emoji", size=11, weight="bold"), text_color="#A0A0A0", anchor="w"
+            self.range_frame, text="Start: -", font=ctk.CTkFont(family=EMOJI_FONT, size=11, weight="bold"), text_color="#A0A0A0", anchor="w"
         )
         self.start_val_label.grid(row=1, column=0, sticky="ew", pady=(0, 5))
 
@@ -408,15 +328,15 @@ class TraceGui(ctk.CTk):
         self.end_slider.set(100)
         self.end_slider.grid(row=2, column=0, sticky="ew", pady=(5, 0))
         self.end_val_label = ctk.CTkLabel(
-            self.range_frame, text="End: -", font=ctk.CTkFont(family="Segoe UI Emoji", size=11, weight="bold"), text_color="#A0A0A0", anchor="w"
+            self.range_frame, text="End: -", font=ctk.CTkFont(family=EMOJI_FONT, size=11, weight="bold"), text_color="#A0A0A0", anchor="w"
         )
         self.end_val_label.grid(row=3, column=0, sticky="ew")
 
         # Analysis Mode Selection
-        self.mode_label = CTkPilmojiLabel(
+        self.mode_label = ctk.CTkLabel(
             self.sidebar_frame,
             text="🔍 ANALYSIS MODE",
-            font_size=12,
+            font=ctk.CTkFont(size=12, weight="bold"),
             text_color="#94A3B8",
             anchor="w",
         )
@@ -437,10 +357,10 @@ class TraceGui(ctk.CTk):
         self.mode_combo.grid(row=12, column=0, padx=25, pady=(0, 10), sticky="ew")
 
         # Separator-like padding
-        self.path_label = CTkPilmojiLabel(
+        self.path_label = ctk.CTkLabel(
             self.sidebar_frame,
             text="📂 RESOURCES",
-            font_size=13,
+            font=ctk.CTkFont(size=13, weight="bold"),
             text_color="#FFFFFF",
             anchor="w",
         )
@@ -529,10 +449,10 @@ class TraceGui(ctk.CTk):
         self.header_frame.grid(row=0, column=0, sticky="ew", padx=30, pady=(30, 20))
         self.header_frame.grid_columnconfigure(0, weight=1)
 
-        self.status_label = CTkPilmojiLabel(
+        self.status_label = ctk.CTkLabel(
             self.header_frame,
             text="💤 System Standby",
-            font_size=26,
+            font=ctk.CTkFont(size=26, weight="bold"),
             text_color="#FFFFFF"
         )
         self.status_label.grid(row=0, column=0, sticky="w")
@@ -567,7 +487,7 @@ class TraceGui(ctk.CTk):
         self.token_label = ctk.CTkLabel(
             self.token_info_frame,
             text="Tokens: 0 / 0 (0%)",
-            font=ctk.CTkFont(family="Consolas", size=12, weight="bold"),
+            font=ctk.CTkFont(family=MONO_FONT, size=12, weight="bold"),
             text_color="#94A3B8",
         )
         self.token_label.pack(side="left")
@@ -582,7 +502,7 @@ class TraceGui(ctk.CTk):
         self.realtime_status = ctk.CTkLabel(
             self.main_container,
             text="",
-            font=ctk.CTkFont(family="Consolas", size=16, weight="bold"),
+            font=ctk.CTkFont(family=MONO_FONT, size=16, weight="bold"),
             text_color="#569CD6",
             anchor="w",
             height=25,
@@ -617,10 +537,10 @@ class TraceGui(ctk.CTk):
         self.left_pane = ctk.CTkFrame(
             self.paned_window, fg_color="#0D1117", corner_radius=0
         )
-        self.left_header = CTkPilmojiLabel(
+        self.left_header = ctk.CTkLabel(
             self.left_pane,
             text=" 🤖 AI INVESTIGATOR",
-            font_size=14,
+            font=ctk.CTkFont(size=14, weight="bold"),
             text_color="#4285F4",
             anchor="w",
             height=20,
@@ -629,7 +549,7 @@ class TraceGui(ctk.CTk):
 
         self.text_edit = ctk.CTkTextbox(
             self.left_pane,
-            font=("Segoe UI Emoji", self.console_font_size),
+            font=(EMOJI_FONT, self.console_font_size),
             fg_color="#010409",
             text_color="#E6EDF3",
             border_width=0,
@@ -646,10 +566,10 @@ class TraceGui(ctk.CTk):
         self.right_pane = ctk.CTkFrame(
             self.paned_window, fg_color="#0D1117", corner_radius=0
         )
-        self.right_header = CTkPilmojiLabel(
+        self.right_header = ctk.CTkLabel(
             self.right_pane,
             text=" 💻 SYSTEM LOG",
-            font_size=14,
+            font=ctk.CTkFont(size=14, weight="bold"),
             text_color="#94A3B8",
             anchor="w",
             height=20,
@@ -658,7 +578,7 @@ class TraceGui(ctk.CTk):
 
         self.system_edit = ctk.CTkTextbox(
             self.right_pane,
-            font=("Segoe UI Emoji", self.console_font_size),
+            font=(EMOJI_FONT, self.console_font_size),
             fg_color="#010409",
             text_color="#94A3B8",
             border_width=0,
@@ -689,7 +609,7 @@ class TraceGui(ctk.CTk):
             self.console_font_size = max(self.console_font_size - 1, 6)
 
         # Apply to both
-        new_font = ("Segoe UI Emoji", self.console_font_size)
+        new_font = (EMOJI_FONT, self.console_font_size)
         self.text_edit.configure(font=new_font)
         self.system_edit.configure(font=new_font)
         return "break"  # Prevents default scrolling behavior if Ctrl is held

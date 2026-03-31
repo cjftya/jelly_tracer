@@ -58,7 +58,7 @@ class FusionCoreEngine:
             self.output_callback("⚠️ [Error] Collected data is missing. Cannot proceed.", True)
             return
 
-        Logger.log(collected_data)
+        # Logger.log(collected_data)
 
         if self.is_fast_analysis():
             self.fast_analysis.run(collected_data, output_callback=output_callback)

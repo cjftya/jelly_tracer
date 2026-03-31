@@ -72,6 +72,7 @@ class PointScanner(BaseScanner):
                 "end_index": self.milestone_end_index,
                 "total_delay_ms": point_scan_result['analysis_metadata']['total_delay_ms']
             },
+            "normal_baseline": point_scan_result['normal_baseline'],
             "analysis_metadata": point_scan_result['analysis_metadata'],
             "incidents": point_scan_result['incidents']
         }

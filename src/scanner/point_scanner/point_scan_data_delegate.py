@@ -7,6 +7,7 @@ class PointScanDataDelegate:
         self._common_api = None
         self.output_callback = output_callback
         self.milestones_registry = []  # 추출된 공통 마일스톤 저장소
+        self.normal_baseline_cache = None
         pd.set_option('future.no_silent_downcasting', True)
 
     def init(self, common_api):
@@ -134,50 +135,36 @@ class PointScanDataDelegate:
 
         # 분석 로그 출력
         if self.output_callback:
-            self.output_callback("\n📊 [PERFORMANCE INVESTIGATION TIMELINE]\n")
+            self.output_callback("\n" + "━"*60)
+            self.output_callback("🔍 [POINT SCAN] PERFORMANCE INVESTIGATION TIMELINE")
+            self.output_callback("━"*60 + "\n")
 
             for i, m in enumerate(final_milestones):
-                # 1. Status Symbols & Theme Mapping
-                if m['elapsed_ms_s'] == 0:
-                    theme, status_label = "⚪", " [START / BASELINE]"
-                elif m['interval_delay'] >= 30:
-                    theme, status_label = "🔴", " [CRITICAL SPIKE]"
-                elif m['interval_delay'] > 5:
-                    theme, status_label = "🟠", " [LATENCY INCREASED]"
-                elif m['interval_delay'] <= -5:
-                    theme, status_label = "🔵", " [PERFORMANCE OPTIMIZED]"
-                else:
-                    theme, status_label = "🟢", " [STABLE]"
+                # 1. Milestone Header with Status Indicator
+                # Threshold: 30ms for Critical (🔴), otherwise Stable (🟢)
+                status = "⚪" if m['elapsed_ms_s'] == 0 else ("🔴" if m['interval_delay'] >= 30 else "🟢")
+                self.output_callback(f"{status} {m['name']:<20} | ⏱️ {m['elapsed_ms_s']:>8.1f} ms")
 
-                # 2. Milestone Header Output
-                line = f"{theme} {m['name']:<18} ➔ {m['elapsed_ms_s']:>8.1f} ms"
-                self.output_callback(line + status_label)
-
-                # 3. Connection & Details between Milestones
+                # 2. Interval Data (Vertical connection logic)
                 if i < len(final_milestones) - 1:
-                    # Calculate Latency Bar (10ms per block, max 10)
                     next_m = final_milestones[i+1]
-                    delay_val = next_m['interval_delay']
-                    bar_count = min(max(int(abs(delay_val) / 10), 1), 10)
-                    
-                    # Gauge char: Solid for Delay, Shaded for Improvement
-                    bar_char = "█" if delay_val > 0 else "▒"
-                    progress_bar = bar_char * bar_count
-                    
-                    # Concurrency/Workload Bolt (1 bolt per 3x)
-                    work_val = next_m['concurrency']
-                    bolt = "⚡" * min(int(work_val / 3), 5) if work_val > 1.2 else ""
+                    delay = next_m['interval_delay']
+                    workload = next_m['workload_ms']
+                    concurrency = next_m['concurrency']
 
-                    # Path visualization
-                    self.output_callback(f"   ┃")
-                    self.output_callback(f"   ┃ [Latency Impact] {delay_val:>+8.1f} ms {progress_bar}")
+                    self.output_callback("   │")
+                    # Interval Delay: The actual "Wall-clock" time increase
+                    self.output_callback(f"   │── [LATENCY] {delay:>+8.1f} ms") 
                     
-                    if work_val > 1.2:
-                        self.output_callback(f"   ┃ [Concurrency   ] {work_val:>6.1f}x {bolt} (Total Workload: {next_m['workload_ms']:.1f}ms)")
+                    # Resource Workload: Total sum of slice durations / Parallelism
+                    if workload > 0:
+                        self.output_callback(f"   │── [LOAD   ] {workload:>8.1f} ms_work ({concurrency}x parallel)")
                     
-                    self.output_callback(f"   ┃")
+                    self.output_callback("   │")
 
-                self.output_callback("\n⚖️ [Forensic Verdict]: Prioritize investigating parallel spikes (Workload) and latency shares in the RED-marked sections.")
+            self.output_callback("\n" + "━"*60)
+            self.output_callback("⚖️ [VERDICT]: Investigate 🔴 sections with high LOAD for optimization.")
+            self.output_callback("━"*60)
 
         self.milestones_registry = final_milestones
         return self.milestones_registry
@@ -199,6 +186,8 @@ class PointScanDataDelegate:
         total_observed_delay_ms = end_milestone_data['delta_ms'] - start_milestone_data['delta_ms']
         
         self.output_callback(f"🔍 [Point-Scan] Investigating {total_observed_delay_ms:.1f}ms delay between {start_milestone_data['name']} and {end_milestone_data['name']}", True)
+
+        self.normal_baseline_cache = self.prepare_normal_baseline(scan_range_start_ts_normal, scan_range_end_ts_normal)
 
         # 2. 패키지 소속 모든 스레드 식별
         package_thread_map = self._get_threads_by_package()
@@ -247,8 +236,19 @@ class PointScanDataDelegate:
                 "overlap_factor": overlap_factor,
                 "concurrency_mode": "High (Spamming/Parallel)" if overlap_factor > 1.2 else "Low (Sequential)"
             },
+            "normal_baseline": self.normal_baseline_cache,
             "incidents": final_incidents
         }
+
+    def prepare_normal_baseline(self, start_ts, end_ts):
+        query = f"""
+            SELECT DISTINCT name, AVG(dur)/1e6 as avg_ms_normal 
+            FROM slice 
+            WHERE ts >= {start_ts} AND ts <= {end_ts}
+            GROUP BY name
+        """
+        df_all_normal_names = self._common_api.tp_n.query(query).as_pandas_dataframe()
+        return df_all_normal_names
 
     def _get_threads_by_package(self):
         # common_api에 저장된 slow 트레이스의 upid를 가져옵니다.
@@ -267,13 +267,11 @@ class PointScanDataDelegate:
         
         df = self._common_api.tp_s.query(query).as_pandas_dataframe()
         
-        # utid를 키로, 스레드 이름을 값으로 하는 딕셔너리 반환
         return df.set_index('utid')['name'].to_dict() if not df.empty else {}
 
     def _collect_delay_candidates_across_threads(self, thread_map, start_s, end_s, start_n, end_n):
         target_utids = ",".join(map(str, thread_map.keys()))
         
-        # [수정 포인트] slice 테이블에는 utid가 없으므로 thread_track과 JOIN하여 utid를 가져옵니다.
         query_slow = f"""
             SELECT s.id, s.name, s.ts, s.dur, t.utid 
             FROM slice s
@@ -353,8 +351,8 @@ class PointScanDataDelegate:
         max_accumulated_cap = total_delay_ms * 5.0 
         
         for cand in candidates:
-            # 종료 조건: 개수 10개 초과 또는 누적 지연이 마일스톤의 5배 초과
-            if len(selected) >= 10 or accumulated_ms >= max_accumulated_cap:
+            # 종료 조건: 개수 3개 초과 또는 누적 지연이 마일스톤의 5배 초과
+            if len(selected) >= 3 or accumulated_ms >= max_accumulated_cap:
                 break
             
             is_independent_on_thread = True

@@ -30,6 +30,7 @@ class TraceServerManager:
                 exe_path = os.path.join(
                     os.path.dirname(__file__), "trace_server", "trace_processor"
                 )
+                os.chmod(exe_path, 0o755)
             cmd = f"{exe_path} --httpd {trace} --http-port {port}"
             proc = subprocess.Popen(
                 cmd.split(), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL

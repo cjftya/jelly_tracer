@@ -84,11 +84,17 @@ class OllamaManager(BaseClient):
         forensic_env["OLLAMA_KV_CACHE_TYPE"] = "q8_0"
         forensic_env["OLLAMA_NUM_PARALLEL"] = "1"
 
-        self.__process = subprocess.Popen(
-            ["ollama", "serve"],
-            env=forensic_env,
-            creationflags=subprocess.CREATE_NO_WINDOW,
-        )
+        if self.os_type == "Windows":
+            self.__process = subprocess.Popen(
+                ["ollama", "serve"],
+                env=forensic_env,
+                creationflags=subprocess.CREATE_NO_WINDOW,
+            )
+        else:
+            self.__process = subprocess.Popen(
+                ["ollama", "serve"],
+                env=forensic_env,
+            )
         time.sleep(5)
         print("✅ Complete")
 

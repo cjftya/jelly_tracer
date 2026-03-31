@@ -8,9 +8,9 @@ class InsightScanAIDelegate:
         self.output_callback = output_callback
         self.llm_requester = llm_requester
 
-    def request_analysis(self, context):
+    def request_analysis(self, context, fact_only=False):
         try:
-            system_prompt = InsightScanPromptValues.getSystemPrompt()
+            system_prompt = InsightScanPromptValues.getSystemPrompt(fact_only)
             string_context = json.dumps(context, indent=2, ensure_ascii=False)
             ai_context = [
                 {"role": "system", "content": system_prompt},

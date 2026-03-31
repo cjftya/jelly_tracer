@@ -35,6 +35,8 @@ class InsightScanner(BaseScanner):
             self.output_callback("⚠️ [Error] Master data (collected_data) is missing. Cannot proceed.", True)
             return None
 
+        self.data_provider.set_normal_baseline(self.collected_data.get("normal_baseline", None))
+
         try:
             self.output_callback("🔬 Drilling into trace layers ...")
             deep_dive_evidences = self.data_provider.fetch_deep_dive_package(self.collected_data)
@@ -48,9 +50,7 @@ class InsightScanner(BaseScanner):
             summary_context = self.data_provider.summarize_investigation(self.target_package, self.collected_data['milestones'],
                                                         deep_dive_evidence, full_tree_evidence)
 
-            print(summary_context)
-
-            raw_res = self.ai_analyst.request_analysis(summary_context)
+            raw_res = self.ai_analyst.request_analysis(summary_context, fact_only=self.collected_data.get("fact_only", False))
 
             final_report = self.generate_final_report(summary_context, raw_res)
             thinking_text = raw_res.get('thinking', 'No thinking content available.')
