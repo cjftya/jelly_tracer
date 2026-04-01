@@ -28,18 +28,18 @@ class InsightScanAIDelegate:
 
             full_content = raw_res.get("message", {}).get("content", "")
             
-            thought_match = re.search(r"\[\[THOUGHT\]\](.*?)\[\[/THOUGHT\]\]", full_content, re.DOTALL)
-            if thought_match:
-                thinking_process = thought_match.group(1).strip()
-                final_analysis = re.sub(r"\[\[THOUGHT\]\].*?\[\[/THOUGHT\]\]", "", full_content, flags=re.DOTALL).strip()
+            match = re.search(r"Executive\s+Summary", full_content, re.IGNORECASE)
+            if match:
+                word_start = match.start()
+                line_start = full_content.rfind('\n', 0, word_start) + 1
+                thinking_process_raw = full_content[:line_start].strip()
+                final_analysis = full_content[line_start:].strip()
+                thinking_process = re.sub(r"\[{1,2}/?THOUGHT\]{1,2}", "", thinking_process_raw, flags=re.IGNORECASE).strip()
+                if not thinking_process:
+                    thinking_process = "Internal reasoning was processed."
             else:
-                if "[[THOUGHT]]" in full_content:
-                    parts = full_content.split("[[THOUGHT]]")
-                    thinking_process = parts[1].split("\n\n")[0].strip() # 대략 첫 단락만 추출
-                    final_analysis = full_content.replace("[[THOUGHT]]", "").strip()
-                else:
-                    thinking_process = "Internal reasoning was not tagged correctly by AI."
-                    final_analysis = full_content.strip()
+                thinking_process = "Anchor text 'Executive Summary' not found."
+                final_analysis = full_content.strip()
 
             target_pattern = re.compile(r'Target-?ID[:\s]+(\d+)', re.IGNORECASE)
             target_match = target_pattern.search(final_analysis)

@@ -1,25 +1,50 @@
 class InsightScanPromptValues:
    @staticmethod
-   def _output_requirements(fact_only=False):
-      if fact_only:
+   def get_deep_forensic_narrative(version=1):
+      if version == 1:   # Deep Investigator
          return """
-# [Output Requirements]
-1. **[Executive Summary]**: 2-sentence summary in Hybrid style. Focus on the Dominant Impact.
-2. **[Physical Evidence]**: 
-   - List only the Dominant Slice ID, its absolute Delta/Wait time, and its primary MRI metrics (e.g., io_wait_ms, wchan).
-3. **[Technical Verdict]**: 
-   - Attribution Ratio: Use the provided [App% : System%].
-   - [The Smoking Gun]: The ID with the highest technical impact and its supporting metrics.
-4. **[Target-ID: number]**
+2. **[Deep Forensic Narrative]**: 
+   - **The Causal Story**: Describe the "Chain of Causality" with maximum technical depth.
+   - **Path**: [Triggering Function] -> [Kernel/Hardware Bottleneck (wchan/MRI)] -> [UI Thread Impact].
+   - **The Delta**: Contrast the behavior with the "Normal Baseline" (`is_new_in_slow`).      
+   - *Focus*: Explain the **"Why"** of the kernel's reaction (e.g., why the scheduler chose to preempt).
 """
-      else:
+      elif version == 2: # Standard Reporter
          return """
-# [Output Requirements]
-1. **[Executive Summary]**: 2-sentence summary in Hybrid style. Focus on the Dominant Impact.
 2. **[Deep Forensic Narrative]**: 
    - Paragraph 1 (Discovery): Describe the dominant path found during the holistic scan.
    - Paragraph 2 (Evidence): Link MRI metrics and wchan to prove the physical cause.
    - Paragraph 3 (Context): Summarize the causality and the nature of the stall.
+"""
+      elif version == 3: # Strategic Decider
+         return """
+2. **[Deep Forensic Narrative]**:
+   - **Paragraph 1 (Discovery & Path)**: Describe the Dominant Path identified through the holistic data scan. You must articulate the sequential chain: [Triggering Function] -> [Kernel/Hardware Bottleneck] -> [UI Impact].
+   - **Paragraph 2 (Evidence & MRI)**: Present MRI metrics and wchan as definitive physical evidence. Specifically, provide the technical rationale for "The Why"—explaining why the Kernel encountered a stall on specific resources (e.g., CPU/IO).
+   - **Paragraph 3 (Causality & Delta)**: Summarize the essence of the causality and, based on the `is_new_in_slow` metric, determine whether this is a new Regression or an Inflation caused by resource contention.
+"""
+   
+   @staticmethod
+   def _output_requirements(fact_only=False):
+      if fact_only:
+         return """
+# [Output Requirements]
+1. **[Executive Summary]**: 2-sentence summary in Hybrid style. Focus on the Root Cause, not the container.
+2. **[Physical Evidence]**: 
+   - **Dominant Root Cause ID**: Select the ID where the Kernel Stall actually occurs (the lowest-level slice explaining the bottleneck), NOT the top-level parent container (e.g., activityStart).
+   - List its absolute Delta/Wait time and primary MRI metrics (io_wait, mutex, wchan).
+   - **Kernel State**: Specify the state (D/R/S) for THIS specific ID.
+3. **[Technical Verdict]**: 
+   - Attribution Ratio: [App% : System%].
+   - [The Smoking Gun]: The specific sub-slice ID that initiates the stall and its technical rationale.
+4. **[Target-ID: number]** <-- This must be the ID identified in step 2.
+"""
+      else:
+         deep_forensic_narrative = InsightScanPromptValues.get_deep_forensic_narrative(version=3)
+         return f"""
+# [Output Requirements]
+1. **[Executive Summary]**: 2-sentence summary in Hybrid style. Focus on the Dominant Impact.
+{deep_forensic_narrative}
 3. **[Technical Verdict]**: 
    - Attribution Ratio: Use the provided [App% : System%].
    - [The Smoking Gun]: The ID with the highest technical impact and its supporting metrics.

@@ -28,7 +28,7 @@ class FastAnalysis:
                 final_report = final_result[1]
                 thinking_text = final_result[2]
 
-                # output_callback(f"\n🧠 [AI Thinking...]\n{thinking_text}\n")
+                output_callback(f"\n🧠 [AI Thinking...]\n{thinking_text}\n")
                 output_callback(final_report)
 
     def stop(self):

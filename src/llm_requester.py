@@ -9,44 +9,9 @@ class LLMRequester:
         self.client = None
         self.chunk_count = [0]
 
-        self.chunck_spinner = [
-    # --- [1단계: 기초 형태 기동 (안정적 시작)] ---
-    "◐", "◓", "◑", "◒", "◜", "◠", "◝", "◞", "◡", "◟",
-    
-    # --- [2단계: 바이너리 및 시스템 로직 심문 (글리치 A)] ---
-    "0", "1", "0", "1", "0", "1",
-    "[", "{", "}", "]", "(", ")", "/", "\\", "|", "!", "?", "#", "&", "%",
-    "0x", "A", "0x", "F", "0x", "3", "0x", "9", "A", "C", "I", "D",
-    
-    # --- [3단계: 수사관의 날카로운 직감 (아이콘 깜빡임 A)] ---
-    "🧠", "🧐", "🔎", "🕵️‍♂️", "📝", "📊", "📈", "📉", "⏱️", "⏲️",
-    
-    # --- [4단계: 트레이스 트리 전수 조사 (브라일 패턴 폭주)] ---
-    "⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏", 
-    "⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷",
-    "⢄", "⢂", "⢁", "⡈", "⡐", "⡠", "⡠", "⡐", "⡈", "⢁", "⢂", "⢄",
-    
-    # --- [5단계: 시스템 병목 및 스파이크 감지 (하이테크 글리치)] ---
-    "░", "▒", "▓", "█", "▓", "▒", "░",
-    "▖", "▗", "▝", "▘", "■", "□", "▢", "▣", "▤", "▥", "▦", "▧", "▨", "▩",
-    "---", "-+-", "+++", "-+-", "---",
-    
-    # --- [6단계: 수학적 가설 검증 (추상적 추론)] ---
-    "∑", "∏", "∫", "∂", "∆", "∇", "≈", "≠", "≡",
-    "√", "∞", "∝", "∠", "⊥", "∥",
-    
-    # --- [7단계: 안드로이드 커널의 심연 (아이콘 깜빡임 B)] ---
-    "⚡", "⚙️", "🛠️", "🔧", "🔌", "⚠️", "🚨", "🛑",
-    "🤖", "🍃", "🍦", "🍭", "🥧", "🍰", "🎂",
-    
-    # --- [8단계: 최종 판결 및 기소 (서사적 마무리)] ---
-    "⚖️", "🏛️", "🔨", "💯", "✅", "❌",
-    
-    # --- [9단계: 재부팅 (초기 형태로 복귀)] ---
-    "⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷",
-    "◯", "🟢", "⚫", "🔴", "🔵", "🟡"
-]
-
+        self.chunck_spinner = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+        self.pretty_emojis = ["🔍", "🧠", "⚙️", "🔬", "📡", "💠", "💎", "✨"]
+        
     def chunk_callback(self, chunk, output_callback=None):
         if chunk is None:
             self.chunk_count[0] = 0
@@ -54,37 +19,22 @@ class LLMRequester:
                 output_callback("", False)
             return
 
-        # [수사관의 실시간 사고 흐름 - 영문 문장형]
-        status_phrases = [
-            # STAGE 1: Arrival & Link
-            "Investigator arriving at scene",   # 현장 도착
-            "Securing neural forensic link",    # 신경망 링크 확보
-            "Igniting deep reasoning engine",   # 추론 엔진 가동
-            # STAGE 2: Evidence Mapping
-            "Sifting through trace evidence",   # 트레이스 조사
-            "Tracking Android thread flow",     # 스레드 추적
-            "Mapping evidence tree structure",  # 트리 구조 매핑
-            # STAGE 3: Clue Detection
-            "Scanning for scheduling gaps",     # 스케줄링 갭 탐색
-            "Detecting Binder spam patterns",   # 바인더 스팸 감지
-            "Checking resource contention",     # 자원 경합 확인
-            # STAGE 4: Reasoning
-            "Cross-referencing alibis",         # 알리바이 대조
-            "Analyzing System vs App fault",    # 책임 비중 분석
-            "Deducing hidden kernel delays",    # 커널 지연 추론
-            # STAGE 5: Finalizing
-            "Compiling forensic report",        # 보고서 컴파일
-            "Translating technical insights",   # 인사이트 번역
-            "Finalizing the ultimate verdict"   # 최종 판결 확정
-        ]
+        CYAN = "\033[96m"
+        RESET = "\033[0m"
+
+        # 텍스트는 진행형인 "Thinking..."으로 고정
+        status_text = "Thinking..."
         
-        phrase_idx = (self.chunk_count[0] // 15) % len(status_phrases)
-        spinner_idx = (self.chunk_count[0] // 3) % len(self.chunck_spinner)
+        # 이모지 속도: 18청크마다 (너무 자주 바뀌면 산만하므로)
+        emoji_idx = (self.chunk_count[0] // 18) % len(self.pretty_emojis)
+        # 스피너 속도: 2청크마다 (프레임이 많으므로 분모를 줄여서 회전 속도를 높임)
+        spinner_idx = (self.chunk_count[0] // 2) % len(self.chunck_spinner)
         
-        current_status = status_phrases[phrase_idx]
+        current_emoji = self.pretty_emojis[emoji_idx]
         current_symbol = self.chunck_spinner[spinner_idx]
         
-        spinner_msg = f"\r🔍 {current_status.ljust(40)} {current_symbol}"
+        # 출력: \033[K(줄 지우기)와 ljust를 조합하여 완벽한 고정 위치 출력
+        spinner_msg = f"{current_emoji} {CYAN}{status_text}{RESET} {current_symbol}" # 예: " 🔬 Thinking... ⠸"
         
         if output_callback:
             output_callback(spinner_msg, False)

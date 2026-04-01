@@ -138,12 +138,21 @@ You MUST strictly follow this logical flow inside [[THOUGHT]] tags:
 
             full_response_text = self.request_analysis(ai_context)
 
-            thought_match = re.search(r'\[\[THOUGHT\]\](.*?)\[\[/THOUGHT\]\]', full_response_text, re.DOTALL)
-            ai_thought = thought_match.group(1).strip() if thought_match else "내적 추론을 찾을 수 없습니다."
-            final_summary = re.sub(r'\[\[THOUGHT\]\].*?\[\[/THOUGHT\]\]', '', full_response_text, flags=re.DOTALL).strip()
+            anchor_match = re.search(r"Supreme\s+Verdict", full_response_text, re.IGNORECASE)
+            if anchor_match:
+                anchor_idx = anchor_match.start()
+                line_start_idx = full_response_text.rfind('\n', 0, anchor_idx) + 1
+                raw_thought = full_response_text[:line_start_idx].strip()
+                final_summary = full_response_text[line_start_idx:].strip()
+                ai_thought = re.sub(r"\[{1,2}/?THOUGHT\]{1,2}", "", raw_thought, flags=re.IGNORECASE).strip()
+                if not ai_thought:
+                    ai_thought = "None"
+            else:
+                ai_thought = "None"
+                final_summary = full_response_text.strip()
 
-            # if self.output_callback:
-            #     self.output_callback(f"\n🧠 [AI Thinking...]\n{ai_thought}\n")
+            if self.output_callback:
+                self.output_callback(f"\n🧠 [AI Thinking...]\n{ai_thought}\n")
 
             investigation_report = {
                 "milestone_context": milestone_context,
