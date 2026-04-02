@@ -19,22 +19,17 @@ class LLMRequester:
                 output_callback("", False)
             return
 
-        CYAN = "\033[96m"
-        RESET = "\033[0m"
-
-        # 텍스트는 진행형인 "Thinking..."으로 고정
         status_text = "Thinking..."
-        
-        # 이모지 속도: 18청크마다 (너무 자주 바뀌면 산만하므로)
+
+        # 18청크마다 사고 흐름 이모지 교체
         emoji_idx = (self.chunk_count[0] // 18) % len(self.pretty_emojis)
-        # 스피너 속도: 2청크마다 (프레임이 많으므로 분모를 줄여서 회전 속도를 높임)
+        # 2청크마다 10프레임 브라유 스피너 회전
         spinner_idx = (self.chunk_count[0] // 2) % len(self.chunck_spinner)
         
         current_emoji = self.pretty_emojis[emoji_idx]
         current_symbol = self.chunck_spinner[spinner_idx]
         
-        # 출력: \033[K(줄 지우기)와 ljust를 조합하여 완벽한 고정 위치 출력
-        spinner_msg = f"{current_emoji} {CYAN}{status_text}{RESET} {current_symbol}" # 예: " 🔬 Thinking... ⠸"
+        spinner_msg = f"\r{current_emoji} {status_text} {current_symbol}"
         
         if output_callback:
             output_callback(spinner_msg, False)
