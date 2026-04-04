@@ -23,6 +23,13 @@ class InsightScanPromptValues:
    - **Paragraph 2 (Evidence & MRI)**: Present MRI metrics and wchan as definitive physical evidence. Specifically, provide the technical rationale for "The Why"—explaining why the Kernel encountered a stall on specific resources (e.g., CPU/IO).
    - **Paragraph 3 (Causality & Delta)**: Summarize the essence of the causality and, based on the `is_new_in_slow` metric, determine whether this is a new Regression or an Inflation caused by resource contention.
 """
+      elif version == 4: # Production Forensic
+         return """
+2. **[Deep Forensic Narrative]**:
+   - **Paragraph 1 (Dominant Path & Mechanism)**: Identify the "Dominant Path" discovered in the holistic scan and describe the physical mechanism of latency amplification. You must logically connect the flow: [Triggering Function] -> [Thread State Transition (e.g., Running to D-state)] -> [Wall-clock Duration Inflation].
+   - **Paragraph 2 (Physical Evidence & Resource Stall)**: Present MRI metrics (io_wait, runnable, mutex) and wchan as definitive physical evidence. Beyond merely listing values, explain "The Why"—providing an engineering rationale for why the Kernel encountered a bottleneck on specific resources (CPU/IO/Lock).
+   - **Paragraph 3 (Verdict & Responsibility Category)**: Categorize final responsibility into a clear domain [App / System / Kernel]. Instead of ambiguous percentage (%) values, identify the "Primary Driver" and utilize the `is_new_in_slow` metric to determine whether this is a new logic "Regression" or a performance "Inflation" caused by environmental resource contention.
+"""
    
    @staticmethod
    def _output_requirements(fact_only=False):
@@ -35,18 +42,20 @@ class InsightScanPromptValues:
    - List its absolute Delta/Wait time and primary MRI metrics (io_wait, mutex, wchan).
    - **Kernel State**: Specify the state (D/R/S) for THIS specific ID.
 3. **[Technical Verdict]**: 
-   - Attribution Ratio: [App% : System%].
+   - **Responsibility Category**: [Select from App / System / Kernel]
+   - **Primary Driver**: A one-sentence summary of the core cause of the delay.
    - [The Smoking Gun]: The specific sub-slice ID that initiates the stall and its technical rationale.
 4. **[Target-ID: number]** <-- This must be the ID identified in step 2.
 """
       else:
-         deep_forensic_narrative = InsightScanPromptValues.get_deep_forensic_narrative(version=3)
+         deep_forensic_narrative = InsightScanPromptValues.get_deep_forensic_narrative(version=4)
          return f"""
 # [Output Requirements]
 1. **[Executive Summary]**: 2-sentence summary in Hybrid style. Focus on the Dominant Impact.
 {deep_forensic_narrative}
 3. **[Technical Verdict]**: 
-   - Attribution Ratio: Use the provided [App% : System%].
+   - **Responsibility Category**: [Select from App / System / Kernel]
+   - **Primary Driver**: A one-sentence summary of the core cause of the delay.
    - [The Smoking Gun]: The ID with the highest technical impact and its supporting metrics.
 4. **[Target-ID: number]**
 """

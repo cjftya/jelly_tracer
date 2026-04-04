@@ -151,7 +151,6 @@ class InsightScanner(BaseScanner):
   • 🗓️ Timeline : {start_name} ➔ {end_name}
   • ⏱️ Duration : {milestone_delay:,.1f} ms (Delta)
   • 🎯 Target   : {meta.get('app_name')} (ID: {target_id})
-  • ⚡ Impact   : {progress_bar}
   • 🚥 Status   : {icon} {status}
 
 🧠 [ AI ROOT CAUSE ANALYSIS ]

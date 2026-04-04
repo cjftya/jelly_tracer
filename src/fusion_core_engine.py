@@ -1,5 +1,6 @@
 import gc
 from scanner.point_scanner.point_scanner import PointScanner
+from scanner.point_scanner.point_scan_ui import PointScanUI
 from scanner.insight_scanner.insight_scanner import InsightScanner
 from analysis.fast_analysis import FastAnalysis
 from analysis.deep_analysis import DeepAnalysis
@@ -11,12 +12,14 @@ class FusionCoreEngine:
         self.output_callback = None
         self.llm_requester = None
         self.range_callback = None
+        self.chart_canvas = None
 
         self.trace_normal = None
         self.trace_slow = None
         self.target_package = None
 
         self.point_scanner = PointScanner()
+        self.point_scan_ui = PointScanUI()
 
         self.fast_analysis = FastAnalysis()
         self.deep_analysis = DeepAnalysis()
@@ -29,7 +32,8 @@ class FusionCoreEngine:
         self.llm_requester = llm_requester
         self.range_callback = range_callback
 
-    def load(self, trace_normal, trace_slow, target_package):
+    def load(self, trace_normal, trace_slow, target_package, chart_canvas=None):
+        self.chart_canvas = chart_canvas
         self.trace_normal = trace_normal
         self.trace_slow = trace_slow
         self.target_package = target_package
@@ -40,7 +44,18 @@ class FusionCoreEngine:
         if self.range_callback:
             self.range_callback(self.point_scanner.milestone_names)
 
-    def run(self, output_callback=None, start_m_index=0, end_m_index=0, mode=None):
+        # Draw 차트
+        if chart_canvas and self.point_scanner.milestones:
+            self.point_scan_ui.set_info(self.point_scanner.milestones,
+                                        self.point_scanner.milestone_marks)
+            
+            if len(self.point_scanner.milestones) >= 2:
+                if hasattr(chart_canvas, 'after'):
+                    chart_canvas.after(0, lambda: self.point_scan_ui.draw_latency_distribution(chart_canvas, 0, len(self.point_scanner.milestones) - 1))
+                else:
+                    self.point_scan_ui.draw_latency_distribution(chart_canvas, 0, len(self.point_scanner.milestones) - 1)
+
+    def run(self, output_callback=None, mode=None):
         if output_callback:
             self.output_callback = output_callback
         
@@ -49,9 +64,9 @@ class FusionCoreEngine:
             self.fast_analysis.start(self.common_api, self.target_package, self.llm_requester, self.output_callback)
         elif self.is_deep_analysis():
             self.deep_analysis.start(self.common_api, self.target_package, self.llm_requester, self.output_callback)
-        
-        self.point_scanner.milestone_start_index = start_m_index
-        self.point_scanner.milestone_end_index = end_m_index
+
+        self.point_scanner.milestone_start_index = self.point_scan_ui.selected_start_index
+        self.point_scanner.milestone_end_index = self.point_scan_ui.selected_end_index
         collected_data = self.point_scanner.run(output_callback=output_callback)
 
         if collected_data is None:

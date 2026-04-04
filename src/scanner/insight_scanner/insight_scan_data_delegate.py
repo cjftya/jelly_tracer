@@ -96,7 +96,7 @@ class InsightScanDataDelegate:
         st_res = tp.query(st_query).as_pandas_dataframe()
         
         running_ms = st_res[st_res['state'].isin(['Running', 'R'])]['clipped_ns'].sum() / 1e6
-        wait_ms = st_res[st_res['state'].isin(['R+', 'D', 'DK', 'S', 'R'])]['clipped_ns'].sum() / 1e6
+        wait_ms = st_res[st_res['state'].isin(['R+', 'D', 'DK', 'S'])]['clipped_ns'].sum() / 1e6
         runnable_ms = st_res[st_res['state'] == 'R+']['clipped_ns'].sum() / 1e6
         io_ms = st_res[st_res['state'] == 'D']['clipped_ns'].sum() / 1e6
         mutex_ms = st_res[st_res['state'] == 'S']['clipped_ns'].sum() / 1e6
@@ -247,7 +247,6 @@ class InsightScanDataDelegate:
                 "investigation_date": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             },
             "final_verdict": {
-                "responsibility_ratio": {"app": app_norm, "system": sys_norm},
                 "delay_summary_ms": {
                     "pure_app_self": round(total_self, 1),
                     "explicit_system_wait": round(total_wait, 1),

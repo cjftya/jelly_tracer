@@ -100,8 +100,6 @@ class ExecutorThread(threading.Thread):
             
             self.engine.run(
                 output_callback=cb,
-                start_m_index=self.start_m_index,
-                end_m_index=self.end_m_index,
                 model_name=self.model_name,
                 mode=self.mode
             )
@@ -154,8 +152,8 @@ class TraceGui(ctk.CTk):
         time.sleep(3)
 
         self.engine.start(
-            output_callback=self._append_line,
-            range_callback=self.set_range_data
+            output_callback=self._on_stdout_write,
+            range_callback=None
         )
 
         self.after(0, lambda: self.status_label.configure(text="✅ System Ready"))
@@ -286,51 +284,7 @@ class TraceGui(ctk.CTk):
             border_width=0,
             font=ctk.CTkFont(size=12, weight="bold"),
         )
-        self.btn_load_data.grid(row=8, column=0, padx=25, pady=(20, 10), sticky="ew")
-
-        # Range Selection
-        self.range_label = ctk.CTkLabel(
-            self.sidebar_frame,
-            text="📏 SCAN RANGE",
-            font=ctk.CTkFont(size=12, weight="bold"),
-            text_color="#94A3B8",
-            anchor="w",
-        )
-        self.range_label.grid(row=9, column=0, padx=25, pady=(15, 0), sticky="ew")
-
-        self.range_frame = ctk.CTkFrame(self.sidebar_frame, fg_color="transparent")
-        self.range_frame.grid(row=10, column=0, padx=25, pady=(5, 10), sticky="ew")
-        self.range_frame.grid_columnconfigure(0, weight=1)
-
-        self.start_slider = ctk.CTkSlider(
-            self.range_frame, from_=0, to=100, height=16,
-            command=self._on_range_change,
-            progress_color="#4285F4",
-            button_color="#E6EDF3",
-            button_hover_color="#FFFFFF",
-            state="disabled"
-        )
-        self.start_slider.set(0)
-        self.start_slider.grid(row=0, column=0, sticky="ew", pady=(5, 0))
-        self.start_val_label = ctk.CTkLabel(
-            self.range_frame, text="Start: -", font=ctk.CTkFont(family=EMOJI_FONT, size=11, weight="bold"), text_color="#A0A0A0", anchor="w"
-        )
-        self.start_val_label.grid(row=1, column=0, sticky="ew", pady=(0, 5))
-
-        self.end_slider = ctk.CTkSlider(
-            self.range_frame, from_=0, to=100, height=16,
-            command=self._on_range_change,
-            progress_color="#4285F4",
-            button_color="#E6EDF3",
-            button_hover_color="#FFFFFF",
-            state="disabled"
-        )
-        self.end_slider.set(100)
-        self.end_slider.grid(row=2, column=0, sticky="ew", pady=(5, 0))
-        self.end_val_label = ctk.CTkLabel(
-            self.range_frame, text="End: -", font=ctk.CTkFont(family=EMOJI_FONT, size=11, weight="bold"), text_color="#A0A0A0", anchor="w"
-        )
-        self.end_val_label.grid(row=3, column=0, sticky="ew")
+        self.btn_load_data.grid(row=8, column=0, padx=25, pady=(0, 20), sticky="ew")
 
         # Analysis Mode Selection
         self.mode_label = ctk.CTkLabel(
@@ -436,13 +390,13 @@ class TraceGui(ctk.CTk):
         self.btn_restart.grid(row=100, column=0, padx=25, pady=(100, 20), sticky="ew")
 
         # --- Main Content ---
-        self.main_container = ctk.CTkFrame(self, corner_radius=0, fg_color="#0D1117")
+        self.main_container = ctk.CTkScrollableFrame(
+            self, corner_radius=0, fg_color="#0D1117",
+            scrollbar_button_color="#21262D",
+            scrollbar_button_hover_color="#30363D"
+        )
         self.main_container.grid(row=0, column=1, sticky="nsew")
         self.main_container.grid_columnconfigure(0, weight=1)
-        self.main_container.grid_rowconfigure(3, weight=1)  # Console row should expand
-        self.main_container.grid_rowconfigure(0, weight=0)
-        self.main_container.grid_rowconfigure(1, weight=0)
-        self.main_container.grid_rowconfigure(2, weight=0)
 
         # Header with Run Button
         self.header_frame = ctk.CTkFrame(self.main_container, fg_color="transparent")
@@ -498,7 +452,30 @@ class TraceGui(ctk.CTk):
         self.token_bar.set(0)
         self.token_bar.pack(fill="x", padx=25, pady=(0, 20))
 
-        # Real-time Status View (Spinner)
+        # Chart View Area (New)
+        self.chart_frame = ctk.CTkFrame(
+            self.main_container,
+            corner_radius=8,
+            fg_color="#010409",
+            border_width=0,
+        )
+        self.chart_frame.grid(row=2, column=0, sticky="ew", pady=(0, 30), padx=30)
+        self.chart_frame.grid_columnconfigure(0, weight=1)
+
+        self.chart_canvas = ctk.CTkCanvas(
+            self.chart_frame,
+            bg="#010409",
+            highlightthickness=0,
+            height=180,
+            bd=0
+        )
+        self.chart_canvas.pack(fill="both", expand=True, padx=5, pady=(0, 10))
+        self.chart_canvas.bind("<Configure>", lambda e: self._on_chart_resize(e))
+        self.chart_canvas.bind("<MouseWheel>", self._on_chart_zoom)
+        self.chart_canvas.bind("<Button-1>", self._on_chart_drag_start)
+        self.chart_canvas.bind("<B1-Motion>", self._on_chart_drag)
+
+        # Real-time Status View (Spinner) - Moved to Row 3
         self.realtime_status = ctk.CTkLabel(
             self.main_container,
             text="",
@@ -507,7 +484,7 @@ class TraceGui(ctk.CTk):
             anchor="w",
             height=25,
         )
-        self.realtime_status.grid(row=2, column=0, sticky="ew", padx=35, pady=(0, 2))
+        self.realtime_status.grid(row=3, column=0, sticky="ew", padx=35, pady=(0, 2))
 
         # Console / Terminal View (Split)
         self.console_frame = ctk.CTkFrame(
@@ -515,8 +492,10 @@ class TraceGui(ctk.CTk):
             corner_radius=8,
             fg_color="#0D1117",
             border_width=0,
+            height=500  # Set fixed height to prevent shrinking
         )
-        self.console_frame.grid(row=3, column=0, sticky="nsew", padx=30, pady=(0, 30))
+        self.console_frame.grid(row=4, column=0, sticky="nsew", padx=30, pady=(0, 30))
+        self.console_frame.grid_propagate(False) # Keep fixed height
         self.console_frame.grid_rowconfigure(0, weight=1)
         self.console_frame.grid_columnconfigure(0, weight=1)
 
@@ -559,7 +538,12 @@ class TraceGui(ctk.CTk):
             spacing1=5,
             spacing3=5,
         )
-        self.text_edit.pack(fill="both", expand=True, padx=5, pady=5)
+        
+        self.left_scrollbar = ctk.CTkScrollbar(self.left_pane, command=self.text_edit.yview)
+        self.left_scrollbar.pack(side="right", fill="y", padx=(0, 5), pady=5)
+        
+        self.text_edit.pack(side="left", fill="both", expand=True, padx=(5, 0), pady=5)
+        self.text_edit.configure(yscrollcommand=self.left_scrollbar.set)
         self.paned_window.add(self.left_pane, stretch="always")
 
         # Right Pane: System
@@ -588,7 +572,12 @@ class TraceGui(ctk.CTk):
             spacing1=5,
             spacing3=5,
         )
-        self.system_edit.pack(fill="both", expand=True, padx=5, pady=5)
+        
+        self.right_scrollbar = ctk.CTkScrollbar(self.right_pane, command=self.system_edit.yview)
+        self.right_scrollbar.pack(side="right", fill="y", padx=(0, 5), pady=5)
+        
+        self.system_edit.pack(side="left", fill="both", expand=True, padx=(5, 0), pady=5)
+        self.system_edit.configure(yscrollcommand=self.right_scrollbar.set)
         self.paned_window.add(self.right_pane, stretch="always")
 
         # Bind zoom events (Ctrl + Wheel)
@@ -627,39 +616,6 @@ class TraceGui(ctk.CTk):
         if path:
             entry_widget.delete(0, "end")
             entry_widget.insert(0, path)
-
-    def _on_range_change(self, value):
-        if not self.range_data:
-            return
-        
-        start_idx = int(self.start_slider.get())
-        end_idx = int(self.end_slider.get())
-        
-        # Ensure indices are within bounds
-        start_idx = max(0, min(start_idx, len(self.range_data) - 1))
-        end_idx = max(0, min(end_idx, len(self.range_data) - 1))
-        
-        self.start_val_label.configure(text=f"Start: {self.range_data[start_idx]}")
-        self.end_val_label.configure(text=f"End: {self.range_data[end_idx]}")
-
-    def set_range_data(self, data: list[str]):
-        """Updates the slider range and data points based on the provided list of strings."""
-        self.range_data = data
-        if not data:
-            self.start_slider.configure(from_=0, to=100, number_of_steps=100)
-            self.end_slider.configure(from_=0, to=100, number_of_steps=100)
-            self.start_val_label.configure(text="Start: -")
-            self.end_val_label.configure(text="End: -")
-            return
-            
-        max_idx = len(data) - 1
-        # Set number of steps to max_idx to ensure snaps to whole numbers (indices)
-        self.start_slider.configure(from_=0, to=max_idx, number_of_steps=max_idx if max_idx > 0 else 1)
-        self.end_slider.configure(from_=0, to=max_idx, number_of_steps=max_idx if max_idx > 0 else 1)
-        
-        self.start_slider.set(0)
-        self.end_slider.set(max_idx)
-        self._on_range_change(None)
 
     def _on_load_data(self):
         """Handle trace data loading in a background thread and enable analysis controls."""
@@ -711,13 +667,13 @@ class TraceGui(ctk.CTk):
                     print(f"⚠️ 모델 목록 업데이트 실패: {e}")
 
                 # Call engine.load to initialize data and servers
-                self.engine.load(normal, slow, target_pkg, client_type=client_type, api_key=api_key)
+                self.engine.load(normal, slow, target_pkg, client_type=client_type, api_key=api_key, chart_canvas=self.chart_canvas)
                 
                 # Update GUI on the main thread after successful load
                 self.after(0, self._on_load_success)
             except Exception as e:
                 # Update GUI on the main thread after error
-                self.after(0, lambda: self._on_load_error(e))
+                self.after(0, lambda e=e: self._on_load_error(e))
 
         threading.Thread(target=load_task, daemon=True).start()
 
@@ -725,8 +681,6 @@ class TraceGui(ctk.CTk):
         """Callback for successful data loading."""
         self.btn_load_data.configure(state="disabled")
         self.run_button.configure(state="normal")
-        self.start_slider.configure(state="normal")
-        self.end_slider.configure(state="normal")
         
         # Disable configuration inputs but keep model and mode enabled for selection
         self.package_edit.configure(state="disabled")
@@ -745,11 +699,46 @@ class TraceGui(ctk.CTk):
         messagebox.showinfo("Load Data", f"Trace data loaded successfully. Analysis tools are now enabled.\n\nSettings are locked for this session. Use 'RESTART SYSTEM' to load different traces.")
 
     def _on_load_error(self, error):
-        """Callback for failed data loading."""
+        """Callback for data loading error."""
         self.btn_load_data.configure(state="normal")
-        self.status_label.configure(text="⚠️ System Standby")
-        messagebox.showerror("Load Error", f"Failed to load trace data: {error}")
-        print(f"System Error: Failed to load data - {error}")
+        self.realtime_status.configure(text=f"❌ ERROR: {str(error)}", text_color="#F85149")
+        print(f"❌ 데이터 분석 중 오류 발생: {error}")
+
+    def _on_chart_resize(self, event):
+        """Redraw chart when window size changes."""
+        # Using hasattr to avoid AttributeError if called before engine is initialized
+        if hasattr(self, 'engine') and self.engine and hasattr(self.engine, 'fusion_core_engine'):
+            if self.engine.fusion_core_engine and self.engine.fusion_core_engine.point_scan_ui:
+                self.engine.fusion_core_engine.point_scan_ui.draw_latency_distribution(self.chart_canvas)
+
+    def _on_chart_zoom(self, event):
+        """Handle zoom via mouse wheel + Ctrl on the chart."""
+        # 0x0004: Control key mask
+        is_control = (event.state & 0x0004) != 0
+        
+        if is_control:
+            if hasattr(self, 'engine') and self.engine and hasattr(self.engine, 'fusion_core_engine'):
+                if self.engine.fusion_core_engine and self.engine.fusion_core_engine.point_scan_ui:
+                    # 줌 동작 수행
+                    self.engine.fusion_core_engine.point_scan_ui.on_zoom(event, self.chart_canvas)
+            
+            # 컨트롤이 눌린 상태에서 휠 조작 시, 부모 스크롤(로그 뷰)이 작동하지 않도록 차단
+            return "break"
+            
+        # 컨트롤이 눌리지 않은 경우, 일반적인 스크롤(부모 뷰 이동)을 허용합니다.
+        return None
+
+    def _on_chart_drag_start(self, event):
+        """Handle start of dragging (panning) on the chart."""
+        if hasattr(self, 'engine') and self.engine and hasattr(self.engine, 'fusion_core_engine'):
+            if self.engine.fusion_core_engine and self.engine.fusion_core_engine.point_scan_ui:
+                self.engine.fusion_core_engine.point_scan_ui.on_drag_start(event)
+
+    def _on_chart_drag(self, event):
+        """Handle dragging (panning) motion on the chart."""
+        if hasattr(self, 'engine') and self.engine and hasattr(self.engine, 'fusion_core_engine'):
+            if self.engine.fusion_core_engine and self.engine.fusion_core_engine.point_scan_ui:
+                self.engine.fusion_core_engine.point_scan_ui.on_drag(event, self.chart_canvas)
 
     def _on_run(self):
         self.status_label.configure(text="🧠 Analyzing...")
@@ -762,8 +751,6 @@ class TraceGui(ctk.CTk):
         self.model_combo.configure(state="disabled")
         self.api_key_edit.configure(state="disabled")
         self.mode_combo.configure(state="disabled")
-        self.start_slider.configure(state="disabled")
-        self.end_slider.configure(state="disabled")
         self.normal_edit.configure(state="disabled")
         self.btn_n.configure(state="disabled")
         self.slow_edit.configure(state="disabled")
@@ -788,8 +775,6 @@ class TraceGui(ctk.CTk):
             progress_callback=self._append_line,
             token_callback=self._update_token_usage,
             finished_callback=self._on_finished,
-            start_m_index=int(self.start_slider.get()),
-            end_m_index=int(self.end_slider.get()),
             model_name=model,
             mode=mode,
         )
@@ -853,8 +838,6 @@ class TraceGui(ctk.CTk):
             
             # Re-enable analysis and selection controls (Config remains locked)
             self.run_button.configure(state="normal")
-            self.start_slider.configure(state="normal")
-            self.end_slider.configure(state="normal")
             self.model_combo.configure(state="normal")
             self.mode_combo.configure(state="normal")
             self.btn_restart.configure(state="normal")

@@ -6,17 +6,19 @@ class PointScanDataDelegate:
     def __init__(self, output_callback):
         self._common_api = None
         self.output_callback = output_callback
-        self.milestones_registry = []  # 추출된 공통 마일스톤 저장소
+        self.milestones_registry = [] 
         self.normal_baseline_cache = None
+        self.milestone_marks = []
         pd.set_option('future.no_silent_downcasting', True)
 
     def init(self, common_api):
         self._common_api = common_api
 
-    def get_common_milestones(self):
-        core_candidates = ['bindApplication', 'activityStart', 'activityResume']
+    def calculate_common_milestones(self):
+        targets = ['bindApplication', 'activityStart', 'activityResume', 'VisualComplete']
         
-        def fetch_milestones_by_mode(mode):
+        # 1. 데이터 수집 (Helper)
+        def get_ms_dict(mode):
             try:
                 tp = self._common_api.get_trace_processor(mode)
                 upid = self._common_api.get_upid(mode)
@@ -24,149 +26,101 @@ class PointScanDataDelegate:
                 tp = self._common_api.tp_n if mode == "normal" else self._common_api.tp_s
                 upid = self._common_api.upid_n if mode == "normal" else self._common_api.upid_s
             
-            if tp is None or upid is None:
-                return {}
-
-            # 1. 코어 마일스톤 쿼리: 프로세스 내 모든 스레드 대상
-            milestone_query = f"""
-                SELECT name, ts 
-                FROM slice 
-                WHERE track_id IN (
-                    SELECT id FROM thread_track 
-                    WHERE utid IN (SELECT utid FROM thread WHERE upid = {upid})
-                )
-                AND name IN ({','.join([f"'{name}'" for name in core_candidates])})
-                ORDER BY ts ASC
-            """
-            milestone_df = tp.query(milestone_query).as_pandas_dataframe()
-            # 이름 중복 시 가장 먼저 나타난 타임스탬프 선택
-            milestone_dict = {row['name']: row['ts'] for _, row in milestone_df.drop_duplicates('name').iterrows()}
+            if not tp or not upid: return {}
             
-            # 2. VisualComplete (화면 변화 종료 지점) 탐색
-            base_reference_ts = milestone_dict.get('activityResume', 0)
-            visual_idle_query = f"""
-                SELECT MAX(ts + dur) as last_visual_ts
-                FROM slice
-                WHERE track_id IN (
-                    SELECT id FROM thread_track 
-                    WHERE utid IN (SELECT utid FROM thread WHERE upid = {upid})
-                )
-                AND (name LIKE 'Choreographer%' OR name LIKE 'doFrame%' OR name = 'traversal')
-                AND ts > {base_reference_ts}
-            """
-            visual_df = tp.query(visual_idle_query).as_pandas_dataframe()
+            q = f"SELECT name, ts FROM slice WHERE track_id IN (SELECT id FROM thread_track WHERE utid IN (SELECT utid FROM thread WHERE upid={upid})) AND name IN ({str(targets)[1:-1]}) ORDER BY ts ASC"
+            res = tp.query(q).as_pandas_dataframe().drop_duplicates('name')
+            d = dict(zip(res['name'], res['ts']))
             
-            if not visual_df.empty:
-                last_ts_value = visual_df['last_visual_ts'].iloc[0]
-                if pd.notnull(last_ts_value):
-                    milestone_dict['VisualComplete'] = int(last_ts_value)
+            if 'activityResume' in d and 'VisualComplete' not in d:
+                vq = f"SELECT MAX(ts + dur) as last FROM slice WHERE track_id IN (SELECT id FROM thread_track WHERE utid IN (SELECT utid FROM thread WHERE upid={upid})) AND (name LIKE 'Choreographer%' OR name LIKE 'doFrame%' OR name='traversal') AND ts > {d['activityResume']}"
+                v_res = tp.query(vq).as_pandas_dataframe()
+                if not v_res.empty and pd.notnull(v_res['last'].iloc[0]):
+                    d['VisualComplete'] = int(v_res['last'].iloc[0])
+            return d
+
+        m_n, m_s = get_ms_dict("normal"), get_ms_dict("slow")
+        raw_points = sorted([n for n in targets if n in m_n and n in m_s], key=lambda x: m_s[x])
+        if len(raw_points) < 2: return None
+
+        # 2. 기준점 설정 및 누적 델타 계산
+        base_n, base_s = m_n[raw_points[0]], m_s[raw_points[0]]
+        core_milestones = []
+        for n in raw_points:
+            delta = ((m_s[n] - base_s) - (m_n[n] - base_n)) / 1e6
+            core_milestones.append({"name": n, "ts_s": m_s[n], "ts_n": m_n[n], "delta": delta})
+
+        # 전체 양수 지연 합 (분모용)
+        self.total_positive_sum = sum(max(0, core_milestones[i+1]['delta'] - core_milestones[i]['delta']) 
+                                    for i in range(len(core_milestones)-1))
+
+        # 3. 해상도 결정
+        dur_ms = (core_milestones[-1]['ts_s'] - core_milestones[0]['ts_s']) / 1e6
+        num_bins = max(100, min(1000, int(dur_ms / 5.0)))
+
+        # [보간 함수] 특정 Slow TS 지점의 누적 지연(delta)을 반환
+        def get_interp_delta(target_ts_s):
+            if target_ts_s <= core_milestones[0]['ts_s']: return core_milestones[0]['delta']
+            if target_ts_s >= core_milestones[-1]['ts_s']: return core_milestones[-1]['delta']
+            for i in range(len(core_milestones)-1):
+                m1, m2 = core_milestones[i], core_milestones[i+1]
+                if m1['ts_s'] <= target_ts_s <= m2['ts_s']:
+                    r = (target_ts_s - m1['ts_s']) / (m2['ts_s'] - m1['ts_s'])
+                    return m1['delta'] + (m2['delta'] - m1['delta']) * r
+            return core_milestones[-1]['delta']
+
+        # ---------------------------------------------------------
+        # 4. [데이터 통합] 모든 시간 값과 실제 지연량(ms) 포함
+        # ---------------------------------------------------------
+        self.milestones_registry = []
+        total_range_s = core_milestones[-1]['ts_s'] - core_milestones[0]['ts_s']
+        step_s = total_range_s / num_bins
+
+        for i in range(num_bins):
+            # Slow 트레이스 시간 (나노초)
+            s_ts_start = int(core_milestones[0]['ts_s'] + (i * step_s))
+            s_ts_end = int(core_milestones[0]['ts_s'] + ((i + 1) * step_s))
             
-            return milestone_dict
+            # 보간된 누적 지연값 (ms)
+            delta_start = get_interp_delta(s_ts_start)
+            delta_end = get_interp_delta(s_ts_end)
+            
+            # [신규] 해당 구간에서 발생한 순수 지연량 (ms)
+            # 0보다 작으면(회복 구간) 수사 가치가 없으므로 0으로 클리핑
+            seg_delay_ms = max(0.0, delta_end - delta_start)
+            
+            # 지연 비율
+            ratio = (seg_delay_ms / self.total_positive_sum) if self.total_positive_sum > 0 else 0
+            
+            # [신규] Normal 트레이스 대응 시간 계산 (나노초)
+            # 공식: n_ts = base_n + (s_ts - base_s) - (delta * 1e6)
+            n_ts_start = int(base_n + (s_ts_start - base_s) - (delta_start * 1e6))
+            n_ts_end = int(base_n + (s_ts_end - base_s) - (delta_end * 1e6))
+            
+            # 이름 계승 로직
+            current_name = "Unknown"
+            for m in core_milestones:
+                if s_ts_start >= m['ts_s']:
+                    current_name = m['name']
+                else:
+                    break
 
-        # 양측 데이터 수집
-        milestones_normal = fetch_milestones_by_mode("normal")
-        milestones_slow = fetch_milestones_by_mode("slow")
+            self.milestones_registry.append({
+                "name": current_name,
+                "ts_s_start": s_ts_start,
+                "ts_s_end": s_ts_end,
+                "ts_n_start": n_ts_start,
+                "ts_n_end": n_ts_end,
+                "delay_ms": round(seg_delay_ms, 4), # 이 구간의 순수 지연량
+                "delay_ratio": round(ratio, 4),
+                "status": "HOT" if ratio > 0 else "STABLE"
+            })
 
-        potential_names = core_candidates + ['VisualComplete']
-        common_milestone_names = [name for name in potential_names if name in milestones_normal and name in milestones_slow]
+        self.milestone_marks = core_milestones # 📍 마커용 데이터 별도 보관
 
-        if not common_milestone_names:
-            return None
-
-        base_ts_normal = milestones_normal[common_milestone_names[0]]
-        base_ts_slow = milestones_slow[common_milestone_names[0]]
-
-        final_milestones = []
-        prev_slow_ts = None
-        prev_accumulated_delta = 0
-
-        for name in potential_names:
-            if name in milestones_normal and name in milestones_slow:
-                curr_slow_ts = milestones_slow[name]
-                curr_normal_ts = milestones_normal[name]
-                
-                # 1. 벽시계 시간(Wall-clock) 및 누적 지연 계산
-                elapsed_ms_s = (curr_slow_ts - base_ts_slow) / 1e6
-                elapsed_ms_n = (curr_normal_ts - base_ts_normal) / 1e6
-                accumulated_delta = elapsed_ms_s - elapsed_ms_n
-
-                # 2. [신뢰도 핵심] 구간 내 리소스 워크로드 및 병렬성 계산
-                interval_workload_ms = 0
-                concurrency_factor = 1.0
-                interval_wall_clock = 0
-                
-                if prev_slow_ts is not None:
-                    # 해당 구간(이전 마일스톤 ~ 현재) 동안 발생한 모든 슬라이스 합계(Total Workload)
-                    workload_query = f"""
-                        SELECT SUM(dur) / 1e6 as total_ms
-                        FROM slice
-                        WHERE track_id IN (
-                            SELECT id FROM thread_track 
-                            WHERE utid IN (SELECT utid FROM thread WHERE upid = {self._common_api.upid_s})
-                        )
-                        AND ts >= {prev_slow_ts} AND ts < {curr_slow_ts}
-                    """
-                    res_df = self._common_api.tp_s.query(workload_query).as_pandas_dataframe()
-                    interval_workload_ms = res_df['total_ms'].iloc[0] if not res_df.empty else 0
-                    
-                    # 현재 구간의 순수 흐른 시간 (Wall-clock)
-                    interval_wall_clock = (curr_slow_ts - prev_slow_ts) / 1e6
-                    
-                    # 병렬성 지수 (총 작업량 / 흐른 시간)
-                    if interval_wall_clock > 0:
-                        concurrency_factor = round(interval_workload_ms / interval_wall_clock, 1)
-
-                # 현재 구간만의 지연(Interval Delta)
-                interval_delay = accumulated_delta - prev_accumulated_delta
-
-                final_milestones.append({
-                    "name": name,
-                    "ts_n": curr_normal_ts,
-                    "ts_s": curr_slow_ts,
-                    "delta_ms": round(accumulated_delta, 2), # 누적 지연
-                    "interval_delay": round(interval_delay, 2), # 구간 지연 (대시보드 수치)
-                    "elapsed_ms_s": round(elapsed_ms_s, 2),
-                    "workload_ms": round(interval_workload_ms, 1), # 총 작업 합계 (300ms 등)
-                    "concurrency": concurrency_factor              # 병렬성 배수 (4.2x 등)
-                })
-                
-                prev_slow_ts = curr_slow_ts
-                prev_accumulated_delta = accumulated_delta
-
-        # 분석 로그 출력
         if self.output_callback:
-            self.output_callback("\n" + "━"*60)
-            self.output_callback("🔍 [POINT SCAN] PERFORMANCE INVESTIGATION TIMELINE")
-            self.output_callback("━"*60 + "\n")
+            self.output_callback(f"\n✅ [COMPLETED] {num_bins} segments created with full time-mapping.")
 
-            for i, m in enumerate(final_milestones):
-                # 1. Milestone Header with Status Indicator
-                # Threshold: 30ms for Critical (🔴), otherwise Stable (🟢)
-                status = "⚪" if m['elapsed_ms_s'] == 0 else ("🔴" if m['interval_delay'] >= 30 else "🟢")
-                self.output_callback(f"{status} {m['name']:<20} | ⏱️ {m['elapsed_ms_s']:>8.1f} ms")
-
-                # 2. Interval Data (Vertical connection logic)
-                if i < len(final_milestones) - 1:
-                    next_m = final_milestones[i+1]
-                    delay = next_m['interval_delay']
-                    workload = next_m['workload_ms']
-                    concurrency = next_m['concurrency']
-
-                    self.output_callback("   │")
-                    # Interval Delay: The actual "Wall-clock" time increase
-                    self.output_callback(f"   │── [LATENCY] {delay:>+8.1f} ms") 
-                    
-                    # Resource Workload: Total sum of slice durations / Parallelism
-                    if workload > 0:
-                        self.output_callback(f"   │── [LOAD   ] {workload:>8.1f} ms_work ({concurrency}x parallel)")
-                    
-                    self.output_callback("   │")
-
-            self.output_callback("\n" + "━"*60)
-            self.output_callback("⚖️ [VERDICT]: Investigate 🔴 sections with high LOAD for optimization.")
-            self.output_callback("━"*60)
-
-        self.milestones_registry = final_milestones
         return self.milestones_registry
 
     def run_point_scan(self, target_package_name, start_milestone_index, end_milestone_index, coverage_target_ratio=0.8):
@@ -178,12 +132,17 @@ class PointScanDataDelegate:
         start_milestone_data = self.milestones_registry[start_milestone_index]
         end_milestone_data = self.milestones_registry[end_milestone_index]
         
-        scan_range_start_ts_slow = start_milestone_data['ts_s']
-        scan_range_end_ts_slow = end_milestone_data['ts_s']
-        scan_range_start_ts_normal = start_milestone_data['ts_n']
-        scan_range_end_ts_normal = end_milestone_data['ts_n']
+        scan_range_start_ts_slow = start_milestone_data['ts_s_start']
+        scan_range_end_ts_slow = end_milestone_data['ts_s_end']
+        scan_range_start_ts_normal = start_milestone_data['ts_n_start']
+        scan_range_end_ts_normal = end_milestone_data['ts_n_end']
         
-        total_observed_delay_ms = end_milestone_data['delta_ms'] - start_milestone_data['delta_ms']
+        selected_data = self.milestones_registry[start_milestone_index:end_milestone_index+1]
+
+        # 이 구간의 총 추가 지연 시간(ms)
+        total_observed_delay_ms = sum(item['delay_ms'] for item in selected_data)
+        self.output_callback(f"Range: {start_milestone_data['name']} ({start_milestone_index}) ~ {end_milestone_data['name']} ({end_milestone_index})", True)
+        self.output_callback(f"Total Observed Delay: {total_observed_delay_ms:.1f}ms\n", True)
         
         self.output_callback(f"🔍 [Point-Scan] Investigating {total_observed_delay_ms:.1f}ms delay between {start_milestone_data['name']} and {end_milestone_data['name']}", True)
 
@@ -206,6 +165,7 @@ class PointScanDataDelegate:
         final_incidents = self._select_independent_worst_incidents(
             candidate_incidents, total_observed_delay_ms, coverage_target_ratio
         )
+        print(f"Final Incidents: {final_incidents}")
 
         # 5. Ghost Gap(설명되지 않은 공백) 계산
         captured_delay_sum_ms = sum(inc['delay_delta_ms'] for inc in final_incidents)
@@ -326,7 +286,6 @@ class PointScanDataDelegate:
         return sorted(incident_candidates, key=lambda x: x['delay_delta_ms'], reverse=True)
 
     def _calculate_physical_metrics(self, utid, ts, dur_ns):
-        """thread_state를 분석하여 실제 Running과 Waiting 시간을 분리합니다."""
         query = f"""
             SELECT state, SUM(dur) as dur_ns
             FROM thread_state 
@@ -337,7 +296,7 @@ class PointScanDataDelegate:
         if df.empty: return {"running_ms": 0.0, "waiting_ms": 0.0}
         
         running_ms = df[df['state'].isin(['Running', 'R'])]['dur_ns'].sum() / 1e6
-        waiting_ms = df[df['state'].isin(['R', 'D', 'DK', 'S'])]['dur_ns'].sum() / 1e6
+        waiting_ms = df[df['state'].isin(['R+', 'D', 'DK', 'S'])]['dur_ns'].sum() / 1e6
         
         return {
             "running_ms": round(running_ms, 2),
@@ -348,11 +307,11 @@ class PointScanDataDelegate:
         selected = []
         accumulated_ms = 0
         # 병렬 실행 시 누적 지연은 마일스톤의 수 배가 될 수 있으므로 캡(Cap)을 대폭 완화
-        max_accumulated_cap = total_delay_ms * 5.0 
+        max_accumulated_cap = total_delay_ms * 5.0
         
         for cand in candidates:
-            # 종료 조건: 개수 3개 초과 또는 누적 지연이 마일스톤의 5배 초과
-            if len(selected) >= 3 or accumulated_ms >= max_accumulated_cap:
+            # 종료 조건: 개수 100개 초과 또는 누적 지연이 마일스톤의 5배 초과
+            if len(selected) >= 100 or accumulated_ms >= max_accumulated_cap:
                 break
             
             is_independent_on_thread = True
@@ -360,7 +319,7 @@ class PointScanDataDelegate:
             c_utid = cand.get('utid') # collect 단계에서 utid를 넘겨줘야 함
 
             for sel in selected:
-                # [핵심 로직] 같은 스레드 내에서 시간이 겹치는 경우만 제외 (부모-자식 중복 방지)
+                # 같은 스레드 내에서 시간이 겹치는 경우만 제외 (부모-자식 중복 방지)
                 # 스레드가 다르면 시간이 겹쳐도 병렬 실행이므로 포함시킴
                 if cand['thread_name'] == sel['thread_name']:
                     s_start, s_end = sel['start_timestamp'], sel['start_timestamp'] + sel['duration_ns']
@@ -373,3 +332,30 @@ class PointScanDataDelegate:
                 accumulated_ms += cand['delay_delta_ms']
                 
         return selected
+
+    def test_query(self):
+        query = """
+SELECT name, id, ts, dur FROM slice 
+WHERE (
+    name GLOB 'APP_*' OR 
+    name GLOB 'initAppWoContext' OR 
+    name GLOB 'decodeByteArray' OR 
+    name GLOB 'decodeCacheThumb' OR 
+    name GLOB 'decodeBitmap' OR 
+    name GLOB 'loadLibrary' OR 
+    name GLOB 'initAppOnBg' OR 
+    name GLOB 'initHeavyApiOnBg' OR 
+    name GLOB 'LayoutCache*' OR 
+    name GLOB 'publishAlbumsData*' OR 
+    name GLOB 'query#*' OR 
+    name GLOB 'createFakeView'
+)
+AND track_id IN (
+    208, 213, 224, 249, 265, 267, 268, 319, 320, 321, 322, 324, 325, 
+    333, 335, 336, 342, 343, 345, 349, 361, 366, 371, 386, 403, 419, 
+    421, 460, 467, 470, 472, 564, 832, 842, 988
+)
+        """
+        df = self._common_api.tp_s.query(query).as_pandas_dataframe()
+        print(df)
+        

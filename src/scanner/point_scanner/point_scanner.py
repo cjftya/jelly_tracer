@@ -10,18 +10,19 @@ class PointScanner(BaseScanner):
         
         self.milestones = None
         self.milestone_names = None
+        self.milestone_marks = None
         self.milestone_start_index = 0
         self.milestone_end_index = 0
 
     def start(self, common_api, target_package, llm_requester, output_callback):
         super().start(common_api, target_package, llm_requester, output_callback)
-        
+
         self.data_provider = PointScanDataDelegate(output_callback)
         self.data_provider.init(common_api)
 
-        self.milestones = self.data_provider.get_common_milestones()
-        if self.milestones:
-            self.milestone_names = [m['name'] for m in self.milestones]
+        self.milestones = self.data_provider.calculate_common_milestones()
+        self.milestone_names = [m['name'] for m in self.data_provider.milestones_registry]
+        self.milestone_marks = self.data_provider.milestone_marks
 
     def stop(self):
         super().stop()
@@ -66,8 +67,8 @@ class PointScanner(BaseScanner):
             "milestone_info": {
                 "start_name": start_milestone_data['name'],
                 "end_name": end_milestone_data['name'],
-                "start_ts_ns": start_milestone_data['ts_s'], 
-                "end_ts_ns": end_milestone_data['ts_s'],
+                "start_ts_ns": start_milestone_data['ts_s_start'], 
+                "end_ts_ns": end_milestone_data['ts_s_end'],
                 "start_index": self.milestone_start_index,
                 "end_index": self.milestone_end_index,
                 "total_delay_ms": point_scan_result['analysis_metadata']['total_delay_ms']

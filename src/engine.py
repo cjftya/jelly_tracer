@@ -36,7 +36,7 @@ class Engine:
         #=====================
         self.fusion_core_engine.stop()
 
-    def load(self, trace_normal, trace_slow, target_package, client_type=None, api_key=None):
+    def load(self, trace_normal, trace_slow, target_package, client_type=None, api_key=None, chart_canvas=None):
         if client_type:
             self.llm_requester.init_client(client_type)
         if api_key:
@@ -45,15 +45,13 @@ class Engine:
         self.server_manager.stop_servers()
         self.server_manager.start_servers(trace_normal, trace_slow)
 
-        self.fusion_core_engine.load(trace_normal, trace_slow, target_package)
+        self.fusion_core_engine.load(trace_normal, trace_slow, target_package, chart_canvas=chart_canvas)
 
-    def run(self, output_callback=None, start_m_index=0, end_m_index=0, model_name=None, mode="Fast Analysis"):
+    def run(self, output_callback=None, model_name=None, mode="Fast Analysis"):
         if model_name:
             self.llm_requester.set_model_name(model_name)
 
         self.fusion_core_engine.run(
             output_callback=output_callback,
-            start_m_index=start_m_index,
-            end_m_index=end_m_index,
             mode=mode
         )
