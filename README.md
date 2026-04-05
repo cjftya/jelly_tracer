@@ -1,79 +1,79 @@
 ﻿```text
-         O  -----------  O  -----------  O
-          \             / \             /
-           O  -------  O---O  -------  O
-          / \         /     \         / \
-    >>>> O---O  ---  O-------O  ---  O---O >>>>
-          \ /         \     /         \ /
-           O  -------  O---O  -------  O
-          /             \ /             \
-         O  -----------  O  -----------  O
+           O-------O-------O
+          / \ [E] / \ [B] / \
+    >>>> O---O---O---O---O---O >>>>
+        / \ / \ / [6] \ / \ / \
+    >>>>---O---O--[0]--O---O--->>>>
+        \ / \ / \ / \ / \ / \ /
+    >>>> O---O---O---O---O---O >>>>
+          \ / [S] \ / \ / \ /
+           O-------O-------O
                                
-   🛸 FUSION-CORE 5.0        🕵️‍♂️ POINT-SCAN (L1)
-   🔥 PERFORMANCE            🔬 INSIGHT-SCAN (L2)
-   ⚖️ FORENSICS              🏁 FINAL VERDICT
-                                
-       "Evidence Beyond Doubt, Restoration of Truth."
+🚀 FUSION-CORE 6.0    [E] EXECUTION-SCAN
+⚡ EBS-INTEGRITY      [B] BLOCKED-FORENSICS
+⚖️ DATA-FORENSICS     [S] SCHEDULING-GHOST
+   
+  "EBS Logic: Zero Doubt, Absolute Truth."
 
 ```
 
-# 🕵️‍♂️ Fusion-Core 5.0: Android Performance Forensic Engine ⚡
+# 🕵️‍♂️ Fusion-Core 6.0: Android Performance Forensic Engine ⚡
 
-> **"지연(Lag)은 은폐될 수 있으나, 그 물리적 궤적까지 지울 수는 없다."** > **Fusion-Core 5.0**은 안드로이드 시스템의 미세한 균열을 추적하여, 모호한 성능 저하 가설을 배제하고 **'물리적 좌표'**를 통해 병목의 실체를 확정하는 **차세대 고정밀 사법 부검 엔진**입니다.
-
----
-
-## 🌟 Mission: Absolute Physical Truth
-수억 개의 이벤트가 얽힌 대규모 트레이스 파일에서 의미 없는 소음을 걷어냅니다. **Fusion-Core 5.0**은 인공지능 수사관의 추론 능력과 고정밀 SQL 엔진을 결합하여, 병목의 **고유 식별자**와 **나노초 단위의 물리적 시공간 좌표**를 완벽하게 재구성합니다.
+> Fusion Core 6.0은 안드로이드 앱 실행 지연(App Launch Latency)의 근본 원인을 파헤치기 위해 설계된 고성능 AI 포렌식 엔진입니다. 단순한 지연 시간 측정을 넘어, 커널 스케줄러와 스토리지 스택의 인과관계를 물리적 팩트로 증명합니다.
 
 ---
 
-## 🏗️ Investigative Pillars: The 3-Tier Pipeline
+## 🏗️ Investigative Pillars
 
-### 🛰️ Layer 1: Point-Scan (Precision Strike)
-* **Strategy**: **Zero-Iteration Delta Strike** (무반복 정밀 타격 전략)
-* **Goal**: 전처리된 고정밀 델타 데이터를 관통하여, 수천만 개의 이벤트 중 단 0.1% 미만의 **'병목 임계점(Bottleneck Threshold)'**을 단 한 번의 추론으로 포착합니다.
-* **Process**: 지연이 발생한 시점의 나노초($ns$) 단위 좌표를 확보하고, 수사 대상의 지문(Metadata)이 박제된 **'마스터 브리프(Master Brief)'**를 즉시 생성하여 하위 단계로 인계합니다.
+### 1. Fast Mode (Triage)
+* **Objective**: 수천 개의 실행 데이터 중 전체 지연 시간에 가장 큰 영향을 미친 '핵심 용의자'를 수 초 내에 식별합니다.
+* **Methodology**: `Magnitude is King` 원칙에 입각하여, 절대적인 실행 시간(Delta)과 대기 시간(Wait)이 임계치를 초과하는 노드를 우선순위로 자동 랭킹합니다.
+* **Value**: 수사 초기 단계에서 불필요한 노이즈를 90% 이상 제거하여 분석관의 수사 집중력을 극대화합니다.
 
-### 🔬 Layer 2: Insight-Scan (Physical Evidence Reconstruction)
-* **Strategy**: **Forensic Data Mapping** (데이터 물리 매핑 및 실체화)
-* **Goal**: L1에서 특정된 지연 구간을 실제 안드로이드 시스템 데이터와 1:1로 대조하여 가설이 아닌 **물리적 확증**을 확보합니다.
-* **Process**: AI 수사관이 용의 선상에 오른 슬라이스의 **타겟을 추적**합니다. 이 과정에서 실제 시스템 타임라인상의 **물리 좌표**를 복원하여 반박 불가능한 수사 보고서의 뼈대를 완성합니다.
+### 2. Deep Mode (Systemic Analysis)
+* **Objective**: 개별 사건의 단편적 분석을 넘어, 마일스톤 전체를 관통하는 시스템적 결함을 규명합니다.
+* **Methodology**: 최대 3건의 주요 인시던트를 합성(Synthesis)하여 공통적으로 나타나는 커널 대기 채널(wchan)과 하드웨어 상태 패턴을 매칭합니다.
+* **Value**: 단순 버그 수정을 넘어 시스템 파라미터 최적화나 아키텍처 개선을 위한 **Supreme Verdict(최종 판결)**를 제공합니다.
 
-### ⚖️ Layer 3: Final Verdict (The Indictment)
-* **Strategy**: **100% Normalized Responsibility Engine**
-* **Goal**: "누가, 어디서, 얼마나" 자원을 독점했는지 명시한 **'요약본'**을 작성합니다.
-* **Outcome**: **App vs System Dual-Side Progress Bar**을 통해 책임 소재를 선언하며, 아키텍처 레벨의 개선 방향과 함께 보정된 **Normal/Slow 대조 데이터**를 최종 제공합니다.
+### 3. Detail (EBS Logic)
+* **Data Integrity**: 기존의 모호한 대기 시간 계산법을 탈피하고, 스레드 상태 전이를 기반으로 데이터 무결성을 확보합니다.
+* **Formula (EBS)**: 퓨전 코어 6.0의 모든 수치는 아래의 물리적 등식을 100% 준수합니다.
+  $$Total\ Duration = Execution\ (E) + Blocked\ (B) + Scheduling\ (S)$$
+    * **Execution (E)**: 실제 코드가 CPU를 점유하여 연산한 순수 팩트
+    * **Blocked (B)**: I/O, Mutex, Binder IPC 등 자원 획득 실패로 인해 스레드가 강제로 정지된 팩트
+    * **Scheduling (S)**: 실행 준비는 끝났으나 시스템 부하로 인해 밀려난 '고스트 갭(Runnable)'의 물리적 실체
 
 ---
 
-## 🚀 Advanced Forensic Capabilities
+## 🛰️ Forensic Layers (The 3-Layer Strike)
 
-### 📊 100% Normalized Responsibility Logic
-중첩된 스레드 지연과 병렬 실행 수치를 수학적으로 정규화합니다. AI가 혼란 없이 **상대적 책임 비중**을 판결할 수 있도록 합계 100% 기준의 지분 데이터를 산출합니다.
+### Layer 1: Point-Scan (Precision Strike)
+* **Function**: 지연 시간의 흐름을 추적하여 부모-자식 간의 '지연 상속' 관계를 규명합니다.
+* **Technicality**: `Inheritance Threshold` 로직을 통해 부모의 지연을 실질적으로 유발한 핵심 자식 슬라이스만을 정밀하게 필터링하여 추적합니다.
 
-### 🧬 High-Precision Tree Visualizer
-이름 보존형 정렬 알고리즘을 통해 계층 구조를 유지하면서도 **타겟을 실시간으로 하이라이트**합니다.
-* **📍/▶ Marker**: 수사 타겟을 즉각 식별하는 전용 마커 시스템.
-* **⚠️ [CRITICAL] Tag**: `Wait Time`이나 `Ghost Gap`의 밀도에 따라 위험도를 자동 분류하여 시각화합니다.
+### Layer 2: Insight-Scan (Physical Evidence Reconstruction)
+* **Function**: 커널의 스레드 상태 전이를 분석하여 지연의 물리적 원인을 복원합니다.
+* **Technicality**: MRI(Metric Reconstruction Intelligence) 기술을 통해 `io wait`, `mutex wait`, `runnable` 등 물리적 지표를 재구성하여 움직일 수 없는 증거를 제시합니다.
 
-### 🌪️ Ghost Gap & Hidden Wait Analysis
-* **Ghost Gap**: CPU 자원 기아 상태(`Runnable` 대기)를 분석하여 시스템 과부하로 인한 우선순위 밀림을 증명합니다.
-* **Hidden Wait**: 커널 레벨의 은닉된 대기 시간을 분리하여, 보이지 않는 시스템 호출의 병목을 추적합니다.
+### Layer 3: Context-Scan (Environmental Awareness)
+* **Function**: 타겟 작업 실행 당시의 시스템 전체 환경을 분석하여 '공범(주변 부하)'을 지목합니다.
+* **Technicality**: 타임라인상의 전역 맥락 데이터를 스캔하여 타겟 슬라이스와 동시간대에 자원을 경합하던 배경 작업(Background Tasks)을 검거합니다.
 
 ---
 
 ## 🛠️ Tech Stack & Infrastructure
-* **AI Engine**: **Ollama**
-* **Trace Engine**: **Perfetto Trace Processor**
-* **UX Engine**: **Investigative Real-time Spinner**
+
+* **Analysis Core**: Perfetto Trace Processor 기반의 초고속 트레이스 쿼리 및 분석 엔진
+* **Data Synthesis**: Pandas 기반의 대규모 시계열 데이터 가공 및 MRI 통계 처리 모듈
+* **Forensic AI**: 사건의 인과관계를 추론하고 최종 판결 문장을 생성하는 Gemma 기반 AI Inspector
 
 ---
 
 ## 🏁 Roadmap
-* **✅ Phase 1**: L1/L2 하이브리드 파이프라인 및 고정밀 델타 탐지기 구축 완료
-* **✅ Phase 2**: 가설 검증 단계를 제거하고 **물리 좌표 복원(Evidence Reconstruction)** 엔진으로 전면 개편
-* **🔄 Phase 3**: 멀티 트레이스 Diff 분석 및 커널 스케줄러 전문 분석 모듈 확장 (진행 중)
+
+* **Phase 1 (Stabilization)**: EBS 무결성 체계 확립 및 커널 상태 전이 정밀 측정 기술 내재화.
+* **Phase 2 (Intelligence)**: 과거 분석 데이터와 대조하여 성능 퇴보(Regression)를 자동으로 탐지하고 원인 코드를 매핑하는 지능형 모니터링 구축.
+* **Phase 3 (Automation)**: 병목 현상 발견 시 커널 파라미터 튜닝 가이드 및 앱 로직 최적화 제안을 자동으로 수행하는 자가 치유(Self-Healing) 시스템 구현.
 
 ---
 
@@ -81,4 +81,5 @@
 - **cjftya**: AI-Driven Performance Forensic Expert
 
 ---
+
 **"Smooth Intelligence, Sharp Results. Every lag is solvable."**
