@@ -27,14 +27,16 @@ class FusionCoreEngine:
 
         self.selected_collected_data = None
         self.slice_list_widget = None
+        self.selected_incidents_widget = None
         
         self.common_api = None
 
-    def start(self, llm_requester, output_callback, range_callback=None, slice_list_widget=None):
+    def start(self, llm_requester, output_callback, range_callback=None, slice_list_widget=None, selected_incidents_widget=None):
         self.output_callback = output_callback
         self.llm_requester = llm_requester
         self.range_callback = range_callback
         self.slice_list_widget = slice_list_widget
+        self.selected_incidents_widget = selected_incidents_widget
 
     def load(self, trace_normal, trace_slow, target_package, chart_canvas=None):
         self.chart_canvas = chart_canvas
@@ -69,12 +71,16 @@ class FusionCoreEngine:
 
         if self.slice_list_widget:
             if len(selected_incidents) > 0:
-                incidents_slice_info = [i["slice_name"] + f" ({i['delay_delta_ms']})" for i in selected_incidents]
+                incidents_slice_info = [f"[{i['slice_id']}] {i['slice_name']} ({i['delay_delta_ms']})" for i in selected_incidents]
                 self.slice_list_widget.configure(values=incidents_slice_info)
                 self.slice_list_widget.set(incidents_slice_info[0])
             else:
                 self.slice_list_widget.configure(values=["No incidents found"])
                 self.slice_list_widget.set("No incidents found")
+
+        if self.selected_incidents_widget:
+            self.selected_incidents_widget.configure(values=["Selected Incidents"])
+            self.selected_incidents_widget.set("Selected Incidents")
 
     def draw_ui(self, chart_canvas):
         if self.point_scanner.milestones and len(self.point_scanner.milestones) >= 2:
@@ -102,6 +108,22 @@ class FusionCoreEngine:
         if self.chart_canvas:
             self.draw_ui(self.chart_canvas)
 
+    def on_selected_incident(self, choice):
+        if self.selected_incidents_widget:
+            if choice == "No incidents found":
+                return
+                
+            current_values = list(self.selected_incidents_widget.cget("values"))
+            
+            if current_values == ["Selected Incidents"]:
+                current_values = [choice]
+            else:
+                if choice not in current_values:
+                    current_values.append(choice)
+            
+            self.selected_incidents_widget.configure(values=current_values)
+            self.selected_incidents_widget.set(choice)
+
     def run(self, output_callback=None, mode=None):
         if output_callback:
             self.output_callback = output_callback
@@ -117,11 +139,30 @@ class FusionCoreEngine:
             return
 
         # Logger.log(self.selected_collected_data)
+        current_values = list(self.selected_incidents_widget.cget("values"))
+        if current_values == ["Selected Incidents"]:
+            self.output_callback("⚠️ [Error] No incidents selected. Cannot proceed.", True)
+            return
+        
+        incident_map = {inc["slice_id"]: inc for inc in self.selected_collected_data["incidents"]}
+        selected_incidents = []
+        for val in current_values:
+            if val.startswith("[") and "]" in val:
+                try:
+                    slice_id_str = val[1 : val.find("]")]
+                    slice_id = int(slice_id_str)
+                    if slice_id in incident_map:
+                        selected_incidents.append(incident_map[slice_id])
+                except (ValueError, IndexError):
+                    continue
+
+        cumstomize_incidents = self.selected_collected_data.copy()
+        cumstomize_incidents["incidents"] = selected_incidents
 
         if self.is_fast_analysis():
-            self.fast_analysis.run(self.selected_collected_data, output_callback=output_callback)
+            self.fast_analysis.run(cumstomize_incidents, output_callback=output_callback)
         elif self.is_deep_analysis():
-            self.deep_analysis.run(self.selected_collected_data, output_callback=output_callback)
+            self.deep_analysis.run(cumstomize_incidents, output_callback=output_callback)
         
     def stop(self):
         if self.point_scanner:

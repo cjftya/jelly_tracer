@@ -11,7 +11,7 @@ class Engine:
         #================
         self.fusion_core_engine = FusionCoreEngine()
 
-    def start(self, output_callback=None, range_callback=None, slice_list_widget=None):
+    def start(self, output_callback=None, range_callback=None, slice_list_widget=None, selected_incidents_widget=None):
         self.output_callback = output_callback
         if self.llm_requester is None:
             self.llm_requester = LLMRequester()
@@ -24,8 +24,12 @@ class Engine:
             self.llm_requester, 
             self.output_callback, 
             range_callback=range_callback,
-            slice_list_widget=slice_list_widget
+            slice_list_widget=slice_list_widget,
+            selected_incidents_widget=selected_incidents_widget
         )
+
+    def on_selected_incident(self, choice):
+        self.fusion_core_engine.on_selected_incident(choice)
 
     def stop(self):
         if self.llm_requester:

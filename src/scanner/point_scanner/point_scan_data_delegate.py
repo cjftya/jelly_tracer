@@ -362,30 +362,4 @@ class PointScanDataDelegate:
                 accumulated_ms += cand['delay_delta_ms']
                 
         return selected
-
-    def test_query(self):
-        query = """
-SELECT name, id, ts, dur FROM slice 
-WHERE (
-    name GLOB 'APP_*' OR 
-    name GLOB 'initAppWoContext' OR 
-    name GLOB 'decodeByteArray' OR 
-    name GLOB 'decodeCacheThumb' OR 
-    name GLOB 'decodeBitmap' OR 
-    name GLOB 'loadLibrary' OR 
-    name GLOB 'initAppOnBg' OR 
-    name GLOB 'initHeavyApiOnBg' OR 
-    name GLOB 'LayoutCache*' OR 
-    name GLOB 'publishAlbumsData*' OR 
-    name GLOB 'query#*' OR 
-    name GLOB 'createFakeView'
-)
-AND track_id IN (
-    208, 213, 224, 249, 265, 267, 268, 319, 320, 321, 322, 324, 325, 
-    333, 335, 336, 342, 343, 345, 349, 361, 366, 371, 386, 403, 419, 
-    421, 460, 467, 470, 472, 564, 832, 842, 988
-)
-        """
-        df = self._common_api.tp_s.query(query).as_pandas_dataframe()
-        print(df)
         

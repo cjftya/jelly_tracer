@@ -265,7 +265,8 @@ class PointScanUI:
                                          fill=color, outline="white", width=0.5)
                 
                 # 이름 표시 (슬라이스 이름 + 스레드 이름 조합)
-                full_name = f"{inc['slice_name']} ({inc['thread_name']})"
+                slice_id = inc['slice_id']
+                full_name = f"[{slice_id}] {inc['slice_name']} ({inc['thread_name']})"
                 canvas.create_text(x_start + 5, y_cursor + 7, text=full_name, 
                                    fill="white", font=("Segoe UI", 8), anchor="w")
 

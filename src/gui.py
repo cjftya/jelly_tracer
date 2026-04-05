@@ -154,7 +154,8 @@ class TraceGui(ctk.CTk):
         self.engine.start(
             output_callback=self._on_stdout_write,
             range_callback=None,
-            slice_list_widget=self.slice_spinner
+            slice_list_widget=self.slice_spinner,
+            selected_incidents_widget=self.selected_incidents_spinner
         )
 
         self.after(0, lambda: self.status_label.configure(text="✅ System Ready"))
@@ -471,7 +472,8 @@ class TraceGui(ctk.CTk):
         self.slice_spinner = ctk.CTkOptionMenu(
             self.chart_control_frame,
             values=["No incidents found"],
-            width=350,
+            command=self._on_slice_selected,
+            width=250,
             height=32,
             fg_color="#21262D",
             button_color="#30363D",
@@ -482,6 +484,22 @@ class TraceGui(ctk.CTk):
             dropdown_font=ctk.CTkFont(size=11)
         )
         self.slice_spinner.pack(side="left")
+
+        # Selected Incidents List (New)
+        self.selected_incidents_spinner = ctk.CTkOptionMenu(
+            self.chart_control_frame,
+            values=["Selected Incidents"],
+            width=250,
+            height=32,
+            fg_color="#21262D",
+            button_color="#30363D",
+            button_hover_color="#3D444D",
+            corner_radius=4,
+            state="disabled",
+            font=ctk.CTkFont(size=11),
+            dropdown_font=ctk.CTkFont(size=11)
+        )
+        self.selected_incidents_spinner.pack(side="left", padx=10)
 
         self.btn_find_incidents = ctk.CTkButton(
             self.chart_control_frame,
@@ -718,6 +736,7 @@ class TraceGui(ctk.CTk):
         self.run_button.configure(state="normal")
         self.btn_find_incidents.configure(state="normal")
         self.slice_spinner.configure(state="normal")
+        self.selected_incidents_spinner.configure(state="normal")
         
         # Disable configuration inputs but keep model and mode enabled for selection
         self.package_edit.configure(state="disabled")
@@ -772,6 +791,11 @@ class TraceGui(ctk.CTk):
         """Find incidents in the current chart view range."""
         if hasattr(self, 'engine') and self.engine:
             self.engine.on_find_incidents_clicked()
+
+    def _on_slice_selected(self, choice):
+        """Handle selection of an incident to add it to the final analysis list."""
+        if hasattr(self, 'engine') and self.engine:
+            self.engine.on_selected_incident(choice)
 
     def _on_run(self):
         self.status_label.configure(text="🧠 Analyzing...")
@@ -875,6 +899,8 @@ class TraceGui(ctk.CTk):
             # Re-enable analysis and selection controls (Config remains locked)
             self.run_button.configure(state="normal")
             self.btn_find_incidents.configure(state="normal")
+            self.slice_spinner.configure(state="normal")
+            self.selected_incidents_spinner.configure(state="normal")
             self.model_combo.configure(state="normal")
             self.mode_combo.configure(state="normal")
             self.btn_restart.configure(state="normal")
