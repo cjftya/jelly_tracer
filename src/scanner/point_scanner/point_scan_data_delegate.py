@@ -340,8 +340,8 @@ class PointScanDataDelegate:
         max_accumulated_cap = total_delay_ms * 5.0
         
         for cand in candidates:
-            # 종료 조건: 개수 100개 초과 또는 누적 지연이 마일스톤의 5배 초과
-            if len(selected) >= 100 or accumulated_ms >= max_accumulated_cap:
+            # 종료 조건: 개수 20개 초과 또는 누적 지연이 마일스톤의 5배 초과
+            if len(selected) >= 20 or accumulated_ms >= max_accumulated_cap:
                 break
             
             is_independent_on_thread = True

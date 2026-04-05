@@ -1,4 +1,5 @@
 import gc
+import threading
 from scanner.point_scanner.point_scanner import PointScanner
 from scanner.point_scanner.point_scan_ui import PointScanUI
 from scanner.insight_scanner.insight_scanner import InsightScanner
@@ -156,14 +157,57 @@ class FusionCoreEngine:
                 except (ValueError, IndexError):
                     continue
 
+        overall_timeline_context = []
+        for inc in self.selected_collected_data["incidents"]:
+            col = {}
+            col["slice_id"] = int(inc["slice_id"])
+            col["slice_name"] = inc["slice_name"]
+            col["thread_name"] = inc.get("thread_name", "Unknown") 
+            
+            start_ms = inc["start_timestamp"] / 1000000.0
+            dur_ms = inc["duration_ns"] / 1000000.0
+            
+            col["start_ms"] = round(start_ms, 2)
+            col["dur_ms"] = round(dur_ms, 2)
+            col["end_ms"] = round(start_ms + dur_ms, 2)
+            
+            overall_timeline_context.append(col)
+        
         cumstomize_incidents = self.selected_collected_data.copy()
         cumstomize_incidents["incidents"] = selected_incidents
-
+        cumstomize_incidents["overall_timeline_context"] = overall_timeline_context
         if self.is_fast_analysis():
             self.fast_analysis.run(cumstomize_incidents, output_callback=output_callback)
         elif self.is_deep_analysis():
             self.deep_analysis.run(cumstomize_incidents, output_callback=output_callback)
         
+    def on_question_to_ai(self, text):
+        if not self.llm_requester or not self.output_callback:
+            return
+            
+        def ask():
+            try:
+                self.output_callback(f"\n🧐 Question: {text}")
+                if self.is_fast_analysis():
+                    ai_context = self.fast_analysis.ai_ask_system_context
+                elif self.is_deep_analysis():
+                    ai_context = self.deep_analysis.ai_ask_system_context
+                ai_context.append({
+                    "role": "user", 
+                    "content": f"[QUESTION] 이건 나의 질문이야. 데이터를 보고 상세히 답해줘. 답변은 꼭 한국어로 작성해줘.\n{text}"
+                })
+
+                raw_res = self.llm_requester.request(
+                    context=ai_context, 
+                    chunk_callback=lambda chunk: self.llm_requester.chunk_callback(chunk, self.output_callback)
+                )
+                full_content = raw_res.get("message", {}).get("content", "")
+                self.output_callback(f"\n✨ AI:\n{full_content}")
+            except Exception as e:
+                self.output_callback(f"\n⚠️ AI failed: {str(e)}", True)
+                
+        threading.Thread(target=ask, daemon=True).start()
+
     def stop(self):
         if self.point_scanner:
             self.point_scanner.stop()

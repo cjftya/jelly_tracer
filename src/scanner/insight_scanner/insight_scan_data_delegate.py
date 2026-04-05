@@ -95,9 +95,15 @@ class InsightScanDataDelegate:
         """
         st_res = tp.query(st_query).as_pandas_dataframe()
         
+        # 1. Running: 실제 CPU 점유
         running_ms = st_res[st_res['state'].isin(['Running', 'R'])]['clipped_ns'].sum() / 1e6
-        wait_ms = st_res[st_res['state'].isin(['R+', 'D', 'DK', 'S'])]['clipped_ns'].sum() / 1e6
+        
+        # 2. Wait (Blocked): 자원(I/O, Mutex) 때문에 강제로 멈춘 시간 (R+ 제외)
+        pure_wait_ms = st_res[st_res['state'].isin(['D', 'DK', 'S'])]['clipped_ns'].sum() / 1e6
+        
+        # 3. Runnable (Ghost): CPU를 기다린 스케줄링 지연 시간
         runnable_ms = st_res[st_res['state'] == 'R+']['clipped_ns'].sum() / 1e6
+
         io_ms = st_res[st_res['state'] == 'D']['clipped_ns'].sum() / 1e6
         mutex_ms = st_res[st_res['state'] == 'S']['clipped_ns'].sum() / 1e6
         
@@ -113,28 +119,32 @@ class InsightScanDataDelegate:
             if pd.notnull(raw_cpu): top_cpu = int(raw_cpu)
 
         return {
-            'dur': round(a_dur_ns / 1e6, 2), 'self': round(running_ms, 2), 'wait': round(wait_ms, 2),
-            'io_ms': round(io_ms, 2), 'runnable_ms': round(runnable_ms, 2), 'mutex_ms': round(mutex_ms, 2),
-            'cpu': top_cpu, 'wchan': top_wchan
+            'dur': round(a_dur_ns / 1e6, 2), 
+            'self': round(running_ms, 2), 
+            'wait': round(pure_wait_ms, 2),    # R+가 빠진 순수 blocked 시간
+            'io_ms': round(io_ms, 2), 
+            'runnable_ms': round(runnable_ms, 2), # Ghost Gap의 정체
+            'mutex_ms': round(mutex_ms, 2), 
+            'cpu': top_cpu, 
+            'wchan': top_wchan
         }
 
     def _generate_origin_hint(self, m):
-        # AI 환각 방지를 위해 confidence 등 주관적 지표 제거
         hint = {
             "category": "App_Logic",
             "reason": "Code execution or logic processing",
             "suspect": "Main/Worker Thread",
             "wchan": m['wchan']
         }
-        total_wait = m['wait']
-        if total_wait <= 2.0: return hint
+        total_non_running = m['wait'] + m['runnable_ms']
+        if total_non_running <= 2.0: return hint
 
         is_storage = m['wchan'] and any(x in m['wchan'].lower() for x in ['f2fs', 'ext4', 'ufshcd', 'block', 'sdcard'])
-        if m['io_ms'] > (total_wait * 0.4) or is_storage:
+        if m['io_ms'] > (total_non_running * 0.4) or is_storage:
             hint.update({"category": "Kernel_IO", "reason": "D-state detected in storage stack", "suspect": "UFS/FS Driver"})
-        elif m['mutex_ms'] > (total_wait * 0.4):
+        elif m['mutex_ms'] > (total_non_running * 0.4):
             hint.update({"category": "Resource_Contention", "reason": "Mutex Lock or Binder IPC delay", "suspect": "System_Server/Lock"})
-        elif m['runnable_ms'] > (total_wait * 0.5):
+        elif m['runnable_ms'] > (total_non_running * 0.5):
             hint.update({"category": "System_Overload", "reason": "CPU starvation (Runnable state)", "suspect": "Kernel Scheduler"})
         return hint
 
@@ -145,19 +155,13 @@ class InsightScanDataDelegate:
         delta = m['dur']
         if delta <= 0: return None
 
-        # Ghost Gap 계산
-        query = f"SELECT id, dur FROM slice WHERE parent_id = {slice_id}"
-        c_res = self._common_api.tp_s.query(query).as_pandas_dataframe()
-        children_sum = (c_res['dur'].sum() or 0) / 1e6
-        g_gap = round(max(0, delta - children_sum - m['self']), 1)
-
         data = {
             "slice_id": int(slice_id),
             "name": name,
             "delta_time": delta, 
             "self_time": m['self'],
             "wait_time": m['wait'],
-            "ghost_gap": g_gap,
+            "ghost_gap": m['runnable_ms'],
             "is_new_in_slow": (name not in self.normal_lookup),
             "origin_hint": self._generate_origin_hint(m),
             "physical_stats": { 
@@ -220,7 +224,7 @@ class InsightScanDataDelegate:
     def _get_structural_children(self, tp, parent_id):
         return tp.query(f"SELECT id, name, ts, dur FROM slice WHERE parent_id = {parent_id} ORDER BY dur DESC").as_pandas_dataframe()
 
-    def summarize_investigation(self, app_package, selected_milestone_info, flat_data, full_data):
+    def summarize_investigation(self, app_package, selected_milestone_info, overall_timeline_context, flat_data, full_data):
         candidates = flat_data.get("candidates", [])
         if not candidates: return None
 
@@ -230,8 +234,8 @@ class InsightScanDataDelegate:
 
         root_node = candidates[0]
         total_self = root_node.get('self_time', 0)
-        total_ghost = sum(c.get('ghost_gap', 0) for c in candidates)
         total_wait = root_node.get('wait_time', 0)
+        total_ghost = root_node.get('ghost_gap', 0)
         hidden_wait = round(max(0, total_wait - sum(c.get('wait_time', 0) for c in candidates[1:])), 1)
 
         return {
@@ -250,5 +254,6 @@ class InsightScanDataDelegate:
                 }
             },
             "prime_suspects_flat": candidates,
-            "evidence_room_full_tree": full_data
+            "evidence_room_full_tree": full_data,
+            "overall_timeline_context": overall_timeline_context
         }

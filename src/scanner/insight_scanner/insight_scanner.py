@@ -48,7 +48,7 @@ class InsightScanner(BaseScanner):
                 return None
 
             summary_context = self.data_provider.summarize_investigation(self.target_package, self.collected_data['milestones'],
-                                                        deep_dive_evidence, full_tree_evidence)
+                                                        self.collected_data['overall_timeline_context'], deep_dive_evidence, full_tree_evidence)
 
             raw_res = self.ai_analyst.request_analysis(summary_context, fact_only=self.collected_data.get("fact_only", False))
 

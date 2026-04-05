@@ -550,6 +550,7 @@ class TraceGui(ctk.CTk):
         self.console_frame.grid(row=4, column=0, sticky="nsew", padx=30, pady=(0, 40))
         self.console_frame.grid_propagate(False) # Keep fixed height
         self.console_frame.grid_rowconfigure(0, weight=1)
+        self.console_frame.grid_rowconfigure(1, weight=0)
         self.console_frame.grid_columnconfigure(0, weight=1)
 
         # PanedWindow for split view
@@ -564,6 +565,41 @@ class TraceGui(ctk.CTk):
             borderwidth=0
         )
         self.paned_window.grid(row=0, column=0, sticky="nsew", padx=0, pady=0)
+
+        # Chat Input Area (at the bottom of console_frame)
+        self.chat_input_frame = ctk.CTkFrame(self.console_frame, fg_color="#161B22", height=50)
+        self.chat_input_frame.grid(row=1, column=0, sticky="ew", padx=0, pady=0)
+        self.chat_input_frame.grid_columnconfigure(0, weight=1)
+
+        self.chat_entry = ctk.CTkEntry(
+            self.chat_input_frame,
+            placeholder_text="Ask AI about the analysis or traces...",
+            height=35,
+            fg_color="#0D1117",
+            border_color="#30363D",
+            text_color="#C9D1D9",
+            placeholder_text_color="#484F58",
+            corner_radius=6,
+            font=ctk.CTkFont(size=12),
+            state="disabled"
+        )
+        self.chat_entry.grid(row=0, column=0, sticky="ew", padx=(10, 5), pady=8)
+        self.chat_entry.bind("<Return>", lambda e: self._on_question_to_ai())
+
+        self.btn_chat_send = ctk.CTkButton(
+            self.chat_input_frame,
+            text="✉️ SEND",
+            command=self._on_question_to_ai,
+            width=80,
+            height=32,
+            fg_color="#21262D",
+            hover_color="#30363D",
+            text_color="#C9D1D9",
+            corner_radius=6,
+            font=ctk.CTkFont(size=12, weight="bold"),
+            state="disabled"
+        )
+        self.btn_chat_send.grid(row=0, column=1, sticky="w", padx=(5, 10), pady=8)
 
         # Left Pane: AI
         self.left_pane = ctk.CTkFrame(
@@ -792,6 +828,16 @@ class TraceGui(ctk.CTk):
         if hasattr(self, 'engine') and self.engine:
             self.engine.on_find_incidents_clicked()
 
+    def _on_question_to_ai(self):
+        """Send a question to AI investigator."""
+        question = self.chat_entry.get().strip()
+        if not question:
+            return
+            
+        self.chat_entry.delete(0, 'end')
+        if hasattr(self, 'engine') and self.engine:
+            self.engine.on_question_to_ai(question)
+
     def _on_slice_selected(self, choice):
         """Handle selection of an incident to add it to the final analysis list."""
         if hasattr(self, 'engine') and self.engine:
@@ -814,6 +860,8 @@ class TraceGui(ctk.CTk):
         self.slow_edit.configure(state="disabled")
         self.btn_s.configure(state="disabled")
         self.btn_restart.configure(state="disabled")
+        self.chat_entry.configure(state="disabled")
+        self.btn_chat_send.configure(state="disabled")
 
         # Preserve existing logs and add a separator if not empty
         for widget, title in [(self.text_edit, "AI ANALYSIS SESSION"), (self.system_edit, "SYSTEM LOG SESSION")]:
@@ -904,6 +952,8 @@ class TraceGui(ctk.CTk):
             self.model_combo.configure(state="normal")
             self.mode_combo.configure(state="normal")
             self.btn_restart.configure(state="normal")
+            self.chat_entry.configure(state="normal")
+            self.btn_chat_send.configure(state="normal")
             
             messagebox.showinfo("Done", "Analysis finished. Logs have been preserved. You can run another analysis or load new data.")
 

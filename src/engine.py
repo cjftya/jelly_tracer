@@ -31,6 +31,9 @@ class Engine:
     def on_selected_incident(self, choice):
         self.fusion_core_engine.on_selected_incident(choice)
 
+    def on_question_to_ai(self, text):
+        self.fusion_core_engine.on_question_to_ai(text)
+
     def stop(self):
         if self.llm_requester:
             self.llm_requester.stop_engine(full=True)

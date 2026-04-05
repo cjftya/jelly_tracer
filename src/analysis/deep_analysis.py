@@ -10,6 +10,7 @@ class DeepAnalysis:
         self.target_package = None
         self.llm_requester = None
         self.output_callback = None
+        self.ai_ask_system_context = None
         
         self.system_prompt_template = """
 # [Role]
@@ -61,10 +62,11 @@ You MUST strictly follow this logical flow inside [[THOUGHT]] tags:
         overlap_factor = collected_data.get("overlap_factor", 0)
         coverage_efficiency = collected_data.get("coverage_efficiency", 0)
         concurrency_mode = collected_data.get("concurrency_mode", 0)
+        overall_timeline_context = collected_data.get("overall_timeline_context", {})
         incidents_result_data = []
 
         if incidents:
-            for idx, incident in enumerate(incidents):
+            for idx, incident in enumerate(incidents[:3]):
                 if incident.get("is_ghost_incident") or not incident.get("slice_id"):
                     continue
 
@@ -74,7 +76,8 @@ You MUST strictly follow this logical flow inside [[THOUGHT]] tags:
                     "duration_ns": int(incident.get("duration_ns", 0)),
                     "milestones": milestone_context,
                     "normal_baseline": collected_data.get("normal_baseline", None),
-                    "fact_only": True
+                    "fact_only": True,
+                    "overall_timeline_context": overall_timeline_context
                 }
 
                 self.insight_scanner.collected_data = primary_incident_data
@@ -105,20 +108,11 @@ You MUST strictly follow this logical flow inside [[THOUGHT]] tags:
 
             total_self = sum(c['incident_meta']['self_time'] for c in incidents_result_data)
             total_wait = sum(c['incident_meta']['wait_time'] for c in incidents_result_data)
-            total_sum = total_self + total_wait
-            if total_sum > 0:
-                app_ratio = round((total_self / total_sum * 100), 1)
-                sys_ratio = round(100.0 - app_ratio, 1)
-            else:
-                app_ratio = 0.0
-                sys_ratio = 0.0
-
             range_name = f"{milestone_context['start_name']} ~ {milestone_context['end_name']}"
             request_context = {
                 "metadata": {
                     "app_name": self.target_package,
-                    "milestone_range": range_name,  
-                    "calculated_ratios": {"app": f"{app_ratio}%", "system": f"{sys_ratio}%"},
+                    "milestone_range": range_name,
                     "total_delay_delta_ms": round(milestone_context["total_delay_ms"], 1),
                     "investigation_date": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                     "captured_delay_ms": captured_delay_ms,
@@ -126,7 +120,8 @@ You MUST strictly follow this logical flow inside [[THOUGHT]] tags:
                     "overlap_factor": overlap_factor,
                     "concurrency_mode": concurrency_mode
                 },
-                "incidents": incidents_result_data
+                "incidents": incidents_result_data,
+                "global_timeline_summary": overall_timeline_context
             }
 
             Logger.log(f"DeepAnalysis request\n{request_context}")
