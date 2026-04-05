@@ -165,7 +165,6 @@ class PointScanDataDelegate:
         final_incidents = self._select_independent_worst_incidents(
             candidate_incidents, total_observed_delay_ms, coverage_target_ratio
         )
-        print(f"Final Incidents: {final_incidents}")
 
         # 5. Ghost Gap(설명되지 않은 공백) 계산
         captured_delay_sum_ms = sum(inc['delay_delta_ms'] for inc in final_incidents)
@@ -184,8 +183,11 @@ class PointScanDataDelegate:
                 "start_timestamp": scan_range_start_ts_slow,
                 "duration_ns": int(unexplained_ghost_ms * 1e6)
             })
-
-        self.output_callback(f"✅ [Point-Scan] Found {len(final_incidents)} incidents covering {captured_delay_sum_ms/total_observed_delay_ms:.1%} of delay.", True)
+        
+        if total_observed_delay_ms > 0:
+            self.output_callback(f"✅ [Point-Scan] Found {len(final_incidents)} incidents covering {captured_delay_sum_ms/total_observed_delay_ms:.1%} of delay.", True)
+        else:
+            self.output_callback(f"✅ [Point-Scan] Found {len(final_incidents)} incidents.", True)
 
         return {
             "analysis_metadata": {

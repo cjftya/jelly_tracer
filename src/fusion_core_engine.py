@@ -25,12 +25,16 @@ class FusionCoreEngine:
         self.deep_analysis = DeepAnalysis()
         self.mode = None
 
+        self.selected_collected_data = None
+        self.slice_list_widget = None
+        
         self.common_api = None
 
-    def start(self, llm_requester, output_callback, range_callback=None):
+    def start(self, llm_requester, output_callback, range_callback=None, slice_list_widget=None):
         self.output_callback = output_callback
         self.llm_requester = llm_requester
         self.range_callback = range_callback
+        self.slice_list_widget = slice_list_widget
 
     def load(self, trace_normal, trace_slow, target_package, chart_canvas=None):
         self.chart_canvas = chart_canvas
@@ -44,16 +48,64 @@ class FusionCoreEngine:
         if self.range_callback:
             self.range_callback(self.point_scanner.milestone_names)
 
-        # Draw 차트
+        # Draw data initialization
         if chart_canvas and self.point_scanner.milestones:
             self.point_scan_ui.set_info(self.point_scanner.milestones,
                                         self.point_scanner.milestone_marks)
-            
-            if len(self.point_scanner.milestones) >= 2:
-                if hasattr(chart_canvas, 'after'):
-                    chart_canvas.after(0, lambda: self.point_scan_ui.draw_latency_distribution(chart_canvas, 0, len(self.point_scanner.milestones) - 1))
-                else:
-                    self.point_scan_ui.draw_latency_distribution(chart_canvas, 0, len(self.point_scanner.milestones) - 1)
+        
+        self.update_slice_range()
+
+        # Draw chart
+        self.draw_ui(chart_canvas)
+    
+    def update_slice_range(self):
+        if self.point_scanner.milestone_start_index == self.point_scan_ui.selected_start_index and \
+            self.point_scanner.milestone_end_index == self.point_scan_ui.selected_end_index:
+            print("No change in slice range")
+            return
+
+        self.point_scanner.milestone_start_index = self.point_scan_ui.selected_start_index
+        self.point_scanner.milestone_end_index = self.point_scan_ui.selected_end_index
+        self.selected_collected_data = self.point_scanner.run(output_callback=self.output_callback)
+
+        selected_incidents = []
+        if self.selected_collected_data:
+            selected_incidents = self.selected_collected_data["incidents"]
+
+        if self.slice_list_widget:
+            if len(selected_incidents) > 0:
+                incidents_slice_info = [i["slice_name"] + f" ({i['delay_delta_ms']})" for i in selected_incidents]
+                self.slice_list_widget.configure(values=incidents_slice_info)
+                self.slice_list_widget.set(incidents_slice_info[0])
+            else:
+                self.slice_list_widget.configure(values=["No incidents found"])
+                self.slice_list_widget.set("No incidents found")
+
+        self.point_scan_ui.draw_latency_distribution(self.chart_canvas)
+
+    def draw_ui(self, chart_canvas):
+        if self.point_scanner.milestones and len(self.point_scanner.milestones) >= 2:
+            if hasattr(chart_canvas, 'after'):
+                chart_canvas.after(0, lambda: self.point_scan_ui.draw_latency_distribution(chart_canvas))
+            else:
+                self.point_scan_ui.draw_latency_distribution(chart_canvas)
+                
+        self.output_callback("Completed drawing chart UI")
+
+    def on_chart_view_drag_start(self, event, chart_canvas):
+        self.point_scan_ui.on_chart_view_drag_start(event, chart_canvas)
+
+    def on_chart_view_drag(self, event, chart_canvas):
+        self.point_scan_ui.on_chart_view_drag(event, chart_canvas)
+
+    def on_chart_view_zoom(self, event, chart_canvas):
+        self.point_scan_ui.on_chart_view_zoom(event, chart_canvas)
+
+    def on_chart_view_resize(self, event, chart_canvas):
+        self.point_scan_ui.on_chart_view_resize(event, chart_canvas)
+
+    def on_find_incidents_clicked(self):
+        self.update_slice_range()
 
     def run(self, output_callback=None, mode=None):
         if output_callback:
@@ -65,20 +117,16 @@ class FusionCoreEngine:
         elif self.is_deep_analysis():
             self.deep_analysis.start(self.common_api, self.target_package, self.llm_requester, self.output_callback)
 
-        self.point_scanner.milestone_start_index = self.point_scan_ui.selected_start_index
-        self.point_scanner.milestone_end_index = self.point_scan_ui.selected_end_index
-        collected_data = self.point_scanner.run(output_callback=output_callback)
-
-        if collected_data is None:
+        if self.selected_collected_data is None:
             self.output_callback("⚠️ [Error] Collected data is missing. Cannot proceed.", True)
             return
 
-        # Logger.log(collected_data)
+        # Logger.log(self.selected_collected_data)
 
         if self.is_fast_analysis():
-            self.fast_analysis.run(collected_data, output_callback=output_callback)
+            self.fast_analysis.run(self.selected_collected_data, output_callback=output_callback)
         elif self.is_deep_analysis():
-            self.deep_analysis.run(collected_data, output_callback=output_callback)
+            self.deep_analysis.run(self.selected_collected_data, output_callback=output_callback)
         
     def stop(self):
         if self.point_scanner:

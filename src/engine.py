@@ -11,7 +11,7 @@ class Engine:
         #================
         self.fusion_core_engine = FusionCoreEngine()
 
-    def start(self, output_callback=None, range_callback=None):
+    def start(self, output_callback=None, range_callback=None, slice_list_widget=None):
         self.output_callback = output_callback
         if self.llm_requester is None:
             self.llm_requester = LLMRequester()
@@ -19,11 +19,12 @@ class Engine:
         if self.server_manager is None:
             self.server_manager = TraceServerManager()
         #=====================
-
+ 
         self.fusion_core_engine.start(
             self.llm_requester, 
             self.output_callback, 
-            range_callback=range_callback
+            range_callback=range_callback,
+            slice_list_widget=slice_list_widget
         )
 
     def stop(self):
@@ -46,6 +47,21 @@ class Engine:
         self.server_manager.start_servers(trace_normal, trace_slow)
 
         self.fusion_core_engine.load(trace_normal, trace_slow, target_package, chart_canvas=chart_canvas)
+
+    def on_chart_view_drag_start(self, event, chart_canvas):
+        self.fusion_core_engine.on_chart_view_drag_start(event, chart_canvas)
+
+    def on_chart_view_drag(self, event, chart_canvas):
+        self.fusion_core_engine.on_chart_view_drag(event, chart_canvas)
+
+    def on_chart_view_zoom(self, event, chart_canvas):
+        self.fusion_core_engine.on_chart_view_zoom(event, chart_canvas)
+
+    def on_chart_view_resize(self, event, chart_canvas):
+        self.fusion_core_engine.on_chart_view_resize(event, chart_canvas)
+
+    def on_find_incidents_clicked(self):
+        self.fusion_core_engine.on_find_incidents_clicked()
 
     def run(self, output_callback=None, model_name=None, mode="Fast Analysis"):
         if model_name:

@@ -11,8 +11,8 @@ class PointScanner(BaseScanner):
         self.milestones = None
         self.milestone_names = None
         self.milestone_marks = None
-        self.milestone_start_index = 0
-        self.milestone_end_index = 0
+        self.milestone_start_index = -1
+        self.milestone_end_index = -1
 
     def start(self, common_api, target_package, llm_requester, output_callback):
         super().start(common_api, target_package, llm_requester, output_callback)

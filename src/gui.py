@@ -153,7 +153,8 @@ class TraceGui(ctk.CTk):
 
         self.engine.start(
             output_callback=self._on_stdout_write,
-            range_callback=None
+            range_callback=None,
+            slice_list_widget=self.slice_spinner
         )
 
         self.after(0, lambda: self.status_label.configure(text="✅ System Ready"))
@@ -462,14 +463,48 @@ class TraceGui(ctk.CTk):
         self.chart_frame.grid(row=2, column=0, sticky="ew", pady=(0, 30), padx=30)
         self.chart_frame.grid_columnconfigure(0, weight=1)
 
+        # Header for Chart (Control Buttons)
+        self.chart_control_frame = ctk.CTkFrame(self.chart_frame, fg_color="transparent")
+        self.chart_control_frame.pack(fill="x", padx=15, pady=(15, 10))
+
+        # Slice Selection List (Spinner)
+        self.slice_spinner = ctk.CTkOptionMenu(
+            self.chart_control_frame,
+            values=["No incidents found"],
+            width=350,
+            height=32,
+            fg_color="#21262D",
+            button_color="#30363D",
+            button_hover_color="#3D444D",
+            corner_radius=4,
+            state="disabled",
+            font=ctk.CTkFont(size=11),
+            dropdown_font=ctk.CTkFont(size=11)
+        )
+        self.slice_spinner.pack(side="left")
+
+        self.btn_find_incidents = ctk.CTkButton(
+            self.chart_control_frame,
+            text="🔍 FIND INCIDENTS",
+            command=self._on_find_incidents,
+            width=150,
+            height=32,
+            fg_color="#238636", # Greenish for discovery action
+            hover_color="#2EA043",
+            corner_radius=4,
+            font=ctk.CTkFont(size=11, weight="bold"),
+            state="disabled"
+        )
+        self.btn_find_incidents.pack(side="right")
+
         self.chart_canvas = ctk.CTkCanvas(
             self.chart_frame,
             bg="#010409",
             highlightthickness=0,
-            height=180,
+            height=200,
             bd=0
         )
-        self.chart_canvas.pack(fill="both", expand=True, padx=5, pady=(0, 10))
+        self.chart_canvas.pack(fill="both", expand=True, padx=5, pady=(0, 15))
         self.chart_canvas.bind("<Configure>", lambda e: self._on_chart_resize(e))
         self.chart_canvas.bind("<MouseWheel>", self._on_chart_zoom)
         self.chart_canvas.bind("<Button-1>", self._on_chart_drag_start)
@@ -484,7 +519,7 @@ class TraceGui(ctk.CTk):
             anchor="w",
             height=25,
         )
-        self.realtime_status.grid(row=3, column=0, sticky="ew", padx=35, pady=(0, 2))
+        self.realtime_status.grid(row=3, column=0, sticky="ew", padx=35, pady=(15, 10))
 
         # Console / Terminal View (Split)
         self.console_frame = ctk.CTkFrame(
@@ -494,7 +529,7 @@ class TraceGui(ctk.CTk):
             border_width=0,
             height=500  # Set fixed height to prevent shrinking
         )
-        self.console_frame.grid(row=4, column=0, sticky="nsew", padx=30, pady=(0, 30))
+        self.console_frame.grid(row=4, column=0, sticky="nsew", padx=30, pady=(0, 40))
         self.console_frame.grid_propagate(False) # Keep fixed height
         self.console_frame.grid_rowconfigure(0, weight=1)
         self.console_frame.grid_columnconfigure(0, weight=1)
@@ -681,6 +716,8 @@ class TraceGui(ctk.CTk):
         """Callback for successful data loading."""
         self.btn_load_data.configure(state="disabled")
         self.run_button.configure(state="normal")
+        self.btn_find_incidents.configure(state="normal")
+        self.slice_spinner.configure(state="normal")
         
         # Disable configuration inputs but keep model and mode enabled for selection
         self.package_edit.configure(state="disabled")
@@ -707,44 +744,41 @@ class TraceGui(ctk.CTk):
     def _on_chart_resize(self, event):
         """Redraw chart when window size changes."""
         # Using hasattr to avoid AttributeError if called before engine is initialized
-        if hasattr(self, 'engine') and self.engine and hasattr(self.engine, 'fusion_core_engine'):
-            if self.engine.fusion_core_engine and self.engine.fusion_core_engine.point_scan_ui:
-                self.engine.fusion_core_engine.point_scan_ui.draw_latency_distribution(self.chart_canvas)
+        if hasattr(self, 'engine') and self.engine:
+            self.engine.on_chart_view_resize(event, self.chart_canvas)
 
     def _on_chart_zoom(self, event):
         """Handle zoom via mouse wheel + Ctrl on the chart."""
         # 0x0004: Control key mask
         is_control = (event.state & 0x0004) != 0
-        
         if is_control:
-            if hasattr(self, 'engine') and self.engine and hasattr(self.engine, 'fusion_core_engine'):
-                if self.engine.fusion_core_engine and self.engine.fusion_core_engine.point_scan_ui:
-                    # 줌 동작 수행
-                    self.engine.fusion_core_engine.point_scan_ui.on_zoom(event, self.chart_canvas)
-            
-            # 컨트롤이 눌린 상태에서 휠 조작 시, 부모 스크롤(로그 뷰)이 작동하지 않도록 차단
+            if hasattr(self, 'engine') and self.engine:
+                self.engine.on_chart_view_zoom(event, self.chart_canvas)
             return "break"
-            
-        # 컨트롤이 눌리지 않은 경우, 일반적인 스크롤(부모 뷰 이동)을 허용합니다.
+
         return None
 
     def _on_chart_drag_start(self, event):
         """Handle start of dragging (panning) on the chart."""
-        if hasattr(self, 'engine') and self.engine and hasattr(self.engine, 'fusion_core_engine'):
-            if self.engine.fusion_core_engine and self.engine.fusion_core_engine.point_scan_ui:
-                self.engine.fusion_core_engine.point_scan_ui.on_drag_start(event)
+        if hasattr(self, 'engine') and self.engine:
+            self.engine.on_chart_view_drag_start(event, self.chart_canvas)
 
     def _on_chart_drag(self, event):
         """Handle dragging (panning) motion on the chart."""
-        if hasattr(self, 'engine') and self.engine and hasattr(self.engine, 'fusion_core_engine'):
-            if self.engine.fusion_core_engine and self.engine.fusion_core_engine.point_scan_ui:
-                self.engine.fusion_core_engine.point_scan_ui.on_drag(event, self.chart_canvas)
+        if hasattr(self, 'engine') and self.engine:
+            self.engine.on_chart_view_drag(event, self.chart_canvas)
+
+    def _on_find_incidents(self):
+        """Find incidents in the current chart view range."""
+        if hasattr(self, 'engine') and self.engine:
+            self.engine.on_find_incidents_clicked()
 
     def _on_run(self):
         self.status_label.configure(text="🧠 Analyzing...")
         
         # Disable all UI controls in sidebar and header
         self.run_button.configure(state="disabled")
+        self.btn_find_incidents.configure(state="disabled")
         self.btn_load_data.configure(state="disabled")
         self.package_edit.configure(state="disabled")
         self.client_combo.configure(state="disabled")
@@ -804,8 +838,10 @@ class TraceGui(ctk.CTk):
         target = self.system_edit if system else self.text_edit
         self.after(0, lambda: self._append_to_widget(target, line))
 
-    def _on_stdout_write(self, text: str):
+    def _on_stdout_write(self, text: str, system: bool = True):
         # Handle stdout pieces nicely
+        # Note: system flag is accepted to match callback signature but ignored 
+        # because stdout always goes to the system log.
         self.after(0, lambda: self._append_raw(self.system_edit, text))
 
     def _append_raw(self, widget: ctk.CTkTextbox, text: str):
@@ -838,6 +874,7 @@ class TraceGui(ctk.CTk):
             
             # Re-enable analysis and selection controls (Config remains locked)
             self.run_button.configure(state="normal")
+            self.btn_find_incidents.configure(state="normal")
             self.model_combo.configure(state="normal")
             self.mode_combo.configure(state="normal")
             self.btn_restart.configure(state="normal")

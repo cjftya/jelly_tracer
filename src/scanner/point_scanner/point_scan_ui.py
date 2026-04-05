@@ -29,10 +29,13 @@ class PointScanUI:
         self.selected_start_index = 0
         self.selected_end_index = int(self.zoom_end)
 
-    def on_drag_start(self, event):
+    def on_chart_view_resize(self, event, canvas: ctk.CTkCanvas):
+        self.draw_latency_distribution(canvas)
+    
+    def on_chart_view_drag_start(self, event):
         self.drag_start_x = event.x
 
-    def on_drag(self, event, canvas: ctk.CTkCanvas):
+    def on_chart_view_drag(self, event, canvas: ctk.CTkCanvas):
         if not hasattr(self, 'zoom_start') or not self.milestones_registry:
             return
 
@@ -74,7 +77,7 @@ class PointScanUI:
         
         self.draw_latency_distribution(canvas)
 
-    def on_zoom(self, event, canvas: ctk.CTkCanvas):
+    def on_chart_view_zoom(self, event, canvas: ctk.CTkCanvas):
         if not self.milestones_registry:
             return
 
@@ -124,12 +127,8 @@ class PointScanUI:
 
         self.draw_latency_distribution(canvas)
 
-    def draw_latency_distribution(self, canvas: ctk.CTkCanvas, start_m_index: int = -1, end_m_index: int = -1):
+    def draw_latency_distribution(self, canvas: ctk.CTkCanvas):
         canvas.delete("all")
-
-        if start_m_index != -1 and end_m_index != -1:
-            self.selected_start_index = start_m_index
-            self.selected_end_index = end_m_index
         
         # 1. 기초 레이아웃 설정
         W = canvas.winfo_width() if canvas.winfo_width() > 1 else 800
