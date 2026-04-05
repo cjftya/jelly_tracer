@@ -53,17 +53,12 @@ class FusionCoreEngine:
             self.point_scan_ui.set_info(self.point_scanner.milestones,
                                         self.point_scanner.milestone_marks)
         
-        self.update_slice_range()
+        self.update_range_info()
 
         # Draw chart
         self.draw_ui(chart_canvas)
     
-    def update_slice_range(self):
-        if self.point_scanner.milestone_start_index == self.point_scan_ui.selected_start_index and \
-            self.point_scanner.milestone_end_index == self.point_scan_ui.selected_end_index:
-            print("No change in slice range")
-            return
-
+    def update_range_info(self):
         self.point_scanner.milestone_start_index = self.point_scan_ui.selected_start_index
         self.point_scanner.milestone_end_index = self.point_scan_ui.selected_end_index
         self.selected_collected_data = self.point_scanner.run(output_callback=self.output_callback)
@@ -81,14 +76,12 @@ class FusionCoreEngine:
                 self.slice_list_widget.configure(values=["No incidents found"])
                 self.slice_list_widget.set("No incidents found")
 
-        self.point_scan_ui.draw_latency_distribution(self.chart_canvas)
-
     def draw_ui(self, chart_canvas):
         if self.point_scanner.milestones and len(self.point_scanner.milestones) >= 2:
             if hasattr(chart_canvas, 'after'):
-                chart_canvas.after(0, lambda: self.point_scan_ui.draw_latency_distribution(chart_canvas))
+                chart_canvas.after(0, lambda: self.point_scan_ui.draw(chart_canvas, self.selected_collected_data))
             else:
-                self.point_scan_ui.draw_latency_distribution(chart_canvas)
+                self.point_scan_ui.draw(chart_canvas, self.selected_collected_data)
                 
         self.output_callback("Completed drawing chart UI")
 
@@ -105,7 +98,9 @@ class FusionCoreEngine:
         self.point_scan_ui.on_chart_view_resize(event, chart_canvas)
 
     def on_find_incidents_clicked(self):
-        self.update_slice_range()
+        self.update_range_info()
+        if self.chart_canvas:
+            self.draw_ui(self.chart_canvas)
 
     def run(self, output_callback=None, mode=None):
         if output_callback:

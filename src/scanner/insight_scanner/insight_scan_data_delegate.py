@@ -229,15 +229,10 @@ class InsightScanDataDelegate:
         total_delta = flat_data.get("investigation_context", {}).get("total_delta", 0) or candidates[0].get('delta_time', 0)
 
         root_node = candidates[0]
-        total_self = sum(c.get('self_time', 0) for c in candidates)
+        total_self = root_node.get('self_time', 0)
         total_ghost = sum(c.get('ghost_gap', 0) for c in candidates)
         total_wait = root_node.get('wait_time', 0)
         hidden_wait = round(max(0, total_wait - sum(c.get('wait_time', 0) for c in candidates[1:])), 1)
-
-        app_raw = round(total_self / total_delta, 2) if total_delta > 0 else 0
-        sys_raw = round((total_wait + total_ghost) / total_delta, 2) if total_delta > 0 else 0
-        total_raw = app_raw + sys_raw
-        app_norm, sys_norm = (round((app_raw / total_raw) * 100, 1), round((sys_raw / total_raw) * 100, 1)) if total_raw > 0 else (0.0, 0.0)
 
         return {
             "metadata": {

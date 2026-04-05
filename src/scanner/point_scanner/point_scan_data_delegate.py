@@ -181,7 +181,11 @@ class PointScanDataDelegate:
                 "wait_bottleneck_ms": 0.0,
                 "is_ghost_incident": True,
                 "start_timestamp": scan_range_start_ts_slow,
-                "duration_ns": int(unexplained_ghost_ms * 1e6)
+                "duration_ns": int(unexplained_ghost_ms * 1e6),
+                "normal_info": {
+                    "start_timestamp": scan_range_start_ts_normal,
+                    "duration_ns": 0 
+                }
             })
         
         if total_observed_delay_ms > 0:
@@ -201,6 +205,23 @@ class PointScanDataDelegate:
             "normal_baseline": self.normal_baseline_cache,
             "incidents": final_incidents
         }
+
+    def _get_normal_ts(self, slow_ts):
+        if not self.milestones_registry:
+            return slow_ts
+            
+        if slow_ts <= self.milestones_registry[0]['ts_s_start']:
+            return self.milestones_registry[0]['ts_n_start']
+        if slow_ts >= self.milestones_registry[-1]['ts_s_end']:
+            return self.milestones_registry[-1]['ts_n_end']
+            
+        for m in self.milestones_registry:
+            if m['ts_s_start'] <= slow_ts <= m['ts_s_end']:
+                seg_dur_s = m['ts_s_end'] - m['ts_s_start']
+                if seg_dur_s == 0: return m['ts_n_start']
+                ratio = (slow_ts - m['ts_s_start']) / seg_dur_s
+                return int(m['ts_n_start'] + (m['ts_n_end'] - m['ts_n_start']) * ratio)
+        return slow_ts
 
     def prepare_normal_baseline(self, start_ts, end_ts):
         query = f"""
@@ -270,6 +291,9 @@ class PointScanDataDelegate:
             
             if delay_delta <= 2.0: continue
 
+            normal_start_ts = self._get_normal_ts(int(row['ts']))
+            normal_dur_ns = int(normal_ms * 1e6)
+
             # 물리 지표 상세 계산
             metrics = self._calculate_physical_metrics(row['utid'], row['ts'], row['dur'])
             
@@ -282,7 +306,11 @@ class PointScanDataDelegate:
                 "wait_bottleneck_ms": metrics['waiting_ms'],
                 "start_timestamp": int(row['ts']),
                 "duration_ns": int(row['dur']),
-                "is_ghost_incident": False
+                "is_ghost_incident": False,
+                "normal_info": {
+                    "start_timestamp": normal_start_ts,
+                    "duration_ns": normal_dur_ns
+                }
             })
         
         return sorted(incident_candidates, key=lambda x: x['delay_delta_ms'], reverse=True)
