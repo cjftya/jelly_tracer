@@ -8,6 +8,8 @@ from analysis.deep_analysis import DeepAnalysis
 from common_api import CommonAPI
 from log import Logger
 
+from scanner.insight_scanner.ai_data_generator import AIDataGenerator
+
 class FusionCoreEngine:
     def __init__(self):
         self.output_callback = None
@@ -32,6 +34,8 @@ class FusionCoreEngine:
         
         self.common_api = None
 
+        # self.ai_data_generator = None
+
     def start(self, llm_requester, output_callback, range_callback=None, slice_list_widget=None, selected_incidents_widget=None):
         self.output_callback = output_callback
         self.llm_requester = llm_requester
@@ -45,6 +49,16 @@ class FusionCoreEngine:
         self.trace_slow = trace_slow
         self.target_package = target_package
         self.common_api = CommonAPI(trace_normal, trace_slow, target_package)
+
+        # test_data = [
+        #     {'id': 316577, 'delay_ms': 204} , 
+        #     {'id': 340565, 'delay_ms': 40} , 
+        #     {'id': 329363, 'delay_ms': 100} , 
+        #     {'id': 339598, 'delay_ms': 70} , 
+        #     {'id': 328583, 'delay_ms': 54} , 
+        #     {'id': 339419, 'delay_ms': 20} , 
+        # ]
+        # self.ai_data_generator = AIDataGenerator(self.common_api, test_data)
         
         self.point_scanner.start(self.common_api, self.target_package, self.llm_requester, self.output_callback)
 
