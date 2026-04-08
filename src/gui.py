@@ -166,7 +166,8 @@ class TraceGui(ctk.CTk):
         widgets = [
             self.package_edit, self.client_combo, self.model_combo, self.api_key_edit,
             self.btn_load_data, self.mode_combo, self.normal_edit, self.btn_n,
-            self.slow_edit, self.btn_s, self.btn_restart
+            self.slow_edit, self.btn_s, self.btn_restart,
+            self.db_path_edit, self.btn_db_path, self.btn_export
         ]
         for w in widgets:
             try:
@@ -374,6 +375,60 @@ class TraceGui(ctk.CTk):
             font=ctk.CTkFont(weight="bold")
         )
         self.btn_s.grid(row=3, column=0, sticky="ew")
+
+        # --- Export Database Section ---
+        self.export_label = ctk.CTkLabel(
+            self.sidebar_frame,
+            text="📤 EXPORT DATABASE",
+            font=ctk.CTkFont(size=13, weight="bold"),
+            text_color="#FFFFFF",
+            anchor="w",
+        )
+        self.export_label.grid(row=15, column=0, padx=25, pady=(30, 10), sticky="ew")
+
+        self.export_frame = ctk.CTkFrame(self.sidebar_frame, fg_color="transparent")
+        self.export_frame.grid(row=16, column=0, padx=25, pady=(0, 20), sticky="ew")
+        self.export_frame.grid_columnconfigure(0, weight=1)
+
+        self.db_path_edit = ctk.CTkEntry(
+            self.export_frame,
+            placeholder_text="DB export directory",
+            height=35,
+            fg_color="#0D1117",
+            border_width=0,
+            corner_radius=4,
+            font=ctk.CTkFont(weight="bold")
+        )
+        self.db_path_edit.grid(row=0, column=0, sticky="ew", pady=(0, 5))
+        self.db_path_edit.insert(0, "./")
+
+        self.btn_db_path = ctk.CTkButton(
+            self.export_frame,
+            text="Select Directory",
+            command=self._on_set_db_path,
+            height=32,
+            fg_color="#21262D",
+            border_width=0,
+            hover_color="#30363D",
+            text_color="#8B949E",
+            corner_radius=4,
+            font=ctk.CTkFont(weight="bold")
+        )
+        self.btn_db_path.grid(row=1, column=0, sticky="ew", pady=(0, 15))
+
+        self.btn_export = ctk.CTkButton(
+            self.export_frame,
+            text="EXPORT TO DB",
+            command=self._on_export_db,
+            height=42,
+            fg_color="#4285F4",
+            hover_color="#3367D6",
+            corner_radius=4,
+            border_width=0,
+            font=ctk.CTkFont(size=12, weight="bold"),
+            state="disabled"
+        )
+        self.btn_export.grid(row=2, column=0, sticky="ew")
 
         # Restart Button at the bottom
         self.btn_restart = ctk.CTkButton(
@@ -706,6 +761,41 @@ class TraceGui(ctk.CTk):
             entry_widget.delete(0, "end")
             entry_widget.insert(0, path)
 
+    def _on_set_db_path(self):
+        path = filedialog.askdirectory(
+            title="Select DB export directory"
+        )
+        if path:
+            self.db_path_edit.delete(0, "end")
+            self.db_path_edit.insert(0, path)
+
+    def _on_export_db(self):
+        db_path = self.db_path_edit.get().strip()
+        if not db_path:
+            messagebox.showwarning("Missing path", "Please set the DB save path.")
+            return
+
+        try:
+            self.status_label.configure(text="⏳ Exporting to DB...")
+            self.btn_export.configure(state="disabled")
+            
+            # Run export in background
+            def export_task():
+                try:
+                    self.engine.export_db(db_path)
+                    self.after(0, lambda: messagebox.showinfo("Export Success", f"Analysis data successfully exported to:\n{db_path}"))
+                except Exception as e:
+                    self.after(0, lambda: messagebox.showerror("Export Error", f"Failed to export DB: {str(e)}"))
+                finally:
+                    self.after(0, lambda: self.status_label.configure(text="📦 Data Loaded - Ready"))
+                    self.after(0, lambda: self.btn_export.configure(state="normal"))
+
+            threading.Thread(target=export_task, daemon=True).start()
+            
+        except Exception as e:
+            messagebox.showerror("Export Error", f"Failed to initiate export: {str(e)}")
+            self.btn_export.configure(state="normal")
+
     def _on_load_data(self):
         """Handle trace data loading in a background thread and enable analysis controls."""
         normal = self.normal_edit.get().strip()
@@ -773,6 +863,7 @@ class TraceGui(ctk.CTk):
         self.btn_find_incidents.configure(state="normal")
         self.slice_spinner.configure(state="normal")
         self.selected_incidents_spinner.configure(state="normal")
+        self.btn_export.configure(state="normal")
         
         # Disable configuration inputs but keep model and mode enabled for selection
         self.package_edit.configure(state="disabled")

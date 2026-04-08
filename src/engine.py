@@ -70,6 +70,9 @@ class Engine:
     def on_find_incidents_clicked(self):
         self.fusion_core_engine.on_find_incidents_clicked()
 
+    def export_db(self, db_path):
+        self.server_manager.export_db(db_path)
+
     def run(self, output_callback=None, model_name=None, mode="Fast Analysis"):
         if model_name:
             self.llm_requester.set_model_name(model_name)
