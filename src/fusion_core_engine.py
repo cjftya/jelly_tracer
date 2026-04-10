@@ -50,15 +50,13 @@ class FusionCoreEngine:
         self.target_package = target_package
         self.common_api = CommonAPI(trace_normal, trace_slow, target_package)
 
-        # test_data = [
-        #     {'id': 316577, 'delay_ms': 204} , 
-        #     {'id': 340565, 'delay_ms': 40} , 
-        #     {'id': 329363, 'delay_ms': 100} , 
-        #     {'id': 339598, 'delay_ms': 70} , 
-        #     {'id': 328583, 'delay_ms': 54} , 
-        #     {'id': 339419, 'delay_ms': 20} , 
+        # slice_info_list = [
+        #     {"name": 'activityStart', "delay_ms": 204} , 
+        #     {"name": 'initAppOnBg', "delay_ms": 40} ,
+        #     {"name": 'query#getAlbumCursor', "delay_ms": 70} , 
+        #     {"name": 'bindApplication', "delay_ms": 54}
         # ]
-        # self.ai_data_generator = AIDataGenerator(self.common_api, test_data)
+        # self.ai_data_generator = AIDataGenerator(slice_info_list)
         
         self.point_scanner.start(self.common_api, self.target_package, self.llm_requester, self.output_callback)
 
