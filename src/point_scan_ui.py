@@ -124,7 +124,8 @@ class PointScanUI:
         # 3. 캔버스 높이 및 스크롤 영역 동적 조정
         W = canvas.winfo_width()
         # 캔버스 위젯 자체의 높이를 내용에 맞게 조정하여 ScrollableFrame 내에서 전체가 보이도록 함
-        new_height = max(200, final_y + 50)
+        safe_y = final_y if final_y is not None else 200
+        new_height = max(200, safe_y + 50)
         canvas.configure(height=new_height, scrollregion=(0, 0, W, new_height))
         canvas.update_idletasks()
         
@@ -146,6 +147,10 @@ class PointScanUI:
         BASE_Y = PY_TOP + CHART_H
         
         # 데이터 소스
+        if not self.current_incidents:
+            canvas.create_text(W/2, H/2, text="WAITING FOR HOTZONE ANALYSIS...", fill="#4B5563")
+            return
+
         if not self.milestones_registry:
             canvas.create_text(W/2, H/2, text="WAITING FOR HOTZONE ANALYSIS...", fill="#4B5563")
             return
@@ -240,7 +245,11 @@ class PointScanUI:
                            fill="#8B949E", anchor="nw", font=("Segoe UI", 8, "bold"))
         y_cursor += 30
 
-        for inc in self.current_incidents.get("incidents", []):
+        incidents_data = self.current_incidents
+        if not incidents_data:
+            return
+
+        for inc in incidents_data.get("incidents", []):
             # X 좌표 계산 (Slow 기준 시작 시점으로 정렬)
             x_start = get_x(inc['start_timestamp'])
             x_end_s = get_x(inc['start_timestamp'] + inc['duration_ns'])

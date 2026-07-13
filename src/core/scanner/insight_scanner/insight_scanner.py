@@ -1,14 +1,14 @@
-from scanner.base_scanner import BaseScanner
-from scanner.insight_scanner.insight_scan_data_delegate import InsightScanDataDelegate
-from scanner.insight_scanner.insight_scan_ai_delegate import InsightScanAIDelegate
-from log import Logger
+from core.scanner.base_scanner import BaseScanner
+from core.scanner.insight_scanner.insight_scan_data_delegate import InsightScanDataDelegate
+from core.scanner.insight_scanner.insight_scan_ai_delegate import InsightScanAIDelegate
+from typing import List, Optional, Any, Dict
 
 class InsightScanner(BaseScanner):
     def __init__(self):
         super().__init__()
-        self.collected_data = None  # 1차 분석 결과(마스터 데이터)
-        self.data_provider = None
-        self.ai_analyst = None
+        self.collected_data: Optional[Dict[str, Any]] = None  # 1차 분석 결과(마스터 데이터)
+        self.data_provider: Optional[InsightScanDataDelegate] = None
+        self.ai_analyst: Optional[InsightScanAIDelegate] = None
 
     def start(self, common_api, target_package, llm_requester, output_callback):
         super().start(common_api, target_package, llm_requester, output_callback)
@@ -23,13 +23,22 @@ class InsightScanner(BaseScanner):
         else:
             self.ai_analyst.output_callback = output_callback
     
-    def run(self, output_callback=None):
+    def run(self, output_callback=None) -> Optional[list]:
         if output_callback:
             self.output_callback = output_callback
-            self.data_provider.output_callback = output_callback
-            self.ai_analyst.output_callback = output_callback
+            if self.data_provider:
+                self.data_provider.output_callback = output_callback
+            if self.ai_analyst:
+                self.ai_analyst.output_callback = output_callback
         
+        if not self.output_callback:
+            return None
+            
         self.output_callback(f"🚀 [Insight-Scan] Investigation Started: {self.target_package}")
+
+        if not self.data_provider or not self.ai_analyst:
+            self.output_callback("⚠️ [Error] Data provider or AI analyst is missing. Cannot proceed.", True)
+            return None
 
         if not self.collected_data:
             self.output_callback("⚠️ [Error] Master data (collected_data) is missing. Cannot proceed.", True)
@@ -51,6 +60,11 @@ class InsightScanner(BaseScanner):
                                                         self.collected_data['overall_timeline_context'], deep_dive_evidence, full_tree_evidence)
 
             raw_res = self.ai_analyst.request_analysis(summary_context, fact_only=self.collected_data.get("fact_only", False))
+
+            if not raw_res or "error" in raw_res:
+                error_msg = raw_res.get("error", "Unknown AI error") if raw_res else "No response from AI"
+                self.output_callback(f"⚠️ AI Analysis failed: {error_msg}", True)
+                return None
 
             final_report = self.generate_final_report(summary_context, raw_res)
             thinking_text = raw_res.get('thinking', 'No thinking content available.')

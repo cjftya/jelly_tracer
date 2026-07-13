@@ -1,3 +1,5 @@
+from typing import Optional, List, Any
+
 class BaseScanner:
     def __init__(self):
         self.output_callback = None
@@ -13,6 +15,6 @@ class BaseScanner:
         self.llm_requester = None
         self.output_callback = None
 
-    def run(self, output_callback=None):
+    def run(self, output_callback=None) -> Optional[List[Any]]:
         if output_callback:
             self.output_callback = output_callback

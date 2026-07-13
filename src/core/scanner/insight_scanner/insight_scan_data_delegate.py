@@ -1,4 +1,3 @@
-import re
 import datetime
 import pandas as pd
 
@@ -36,16 +35,19 @@ class InsightScanDataDelegate:
             self.output_callback("🚨 [Error] Invalid target data format.", True)
             return None
 
+        api = self._common_api
+        if not api: return None
+
         # 1. 루트(Target) 정보 조회
         query = f"SELECT s.name, tt.utid FROM slice s JOIN thread_track tt ON s.track_id = tt.id WHERE s.id = {t_id}"
-        res = self._common_api.tp_s.query(query).as_pandas_dataframe()
+        res = api.tp_s.query(query).as_pandas_dataframe()
         if res.empty: return None
 
         root_name = res.iloc[0]['name']
         utid_s = int(res.iloc[0]['utid'])
 
         # 2. 기준 지연 확정
-        s_metrics = self._get_node_metrics_by_id(self._common_api.tp_s, utid_s, t_id, start_ns, end_ns)
+        s_metrics = self._get_node_metrics_by_id(api.tp_s, utid_s, t_id, start_ns, end_ns)
         total_case_duration = s_metrics['dur']
 
         self.output_callback(f"🎯 [Investigation Started] {root_name} | Baseline: {total_case_duration:.1f}ms", True)
@@ -53,9 +55,9 @@ class InsightScanDataDelegate:
         if is_flat:
             candidates = []
             # Flat 모드: depth와 parent_id 포함
-            root_info = self._get_processed_node_data(t_id, root_name, utid_s, 1, total_case_duration, [start_ns, end_ns], parent_id=None, is_flat=True)
+            root_info = self._get_processed_node_data(t_id, root_name, utid_s, 1, [start_ns, end_ns], parent_id=None, is_flat=True)
             if root_info:
-                self._trace_inheritance_recursive(root_info, utid_s, 2, max_depth, total_case_duration, [start_ns, end_ns], candidates)
+                self._trace_inheritance_recursive(root_info, utid_s, 2, max_depth, [start_ns, end_ns], candidates)
             return {
                 "investigation_context": {
                     "milestone_name": root_name, 
@@ -65,7 +67,7 @@ class InsightScanDataDelegate:
             }
         else:
             # Tree 모드: depth와 parent_id 제외 (계층 구조로 인지)
-            return self._build_recursive_node_pro(t_id, root_name, utid_s, 1, max_depth, total_case_duration, [start_ns, end_ns])
+            return self._build_recursive_node_pro(t_id, root_name, utid_s, 1, max_depth, [start_ns, end_ns])
 
     def _get_node_metrics_by_id(self, tp, utid, slice_id, start_ts, end_ts):
         query = f"SELECT ts, dur FROM slice WHERE id = {slice_id}"
@@ -148,10 +150,12 @@ class InsightScanDataDelegate:
             hint.update({"category": "System_Overload", "reason": "CPU starvation (Runnable state)", "suspect": "Kernel Scheduler"})
         return hint
 
-    def _get_processed_node_data(self, slice_id, name, utid, depth, total_case_dur, bounds_s, parent_id=None, is_flat=True):
+    def _get_processed_node_data(self, slice_id, name, utid, depth, bounds_s, parent_id=None, is_flat=True):
         if slice_id is None: return None
+        api = self._common_api
+        if not api: return None
 
-        m = self._get_node_metrics_by_id(self._common_api.tp_s, utid, slice_id, bounds_s[0], bounds_s[1])
+        m = self._get_node_metrics_by_id(api.tp_s, utid, slice_id, bounds_s[0], bounds_s[1])
         delta = m['dur']
         if delta <= 0: return None
 
@@ -179,13 +183,15 @@ class InsightScanDataDelegate:
             
         return data
 
-    def _build_recursive_node_pro(self, slice_id, name, utid, depth, max_depth, total_case_dur, bounds_s, parent_id=None):
+    def _build_recursive_node_pro(self, slice_id, name, utid, depth, max_depth, bounds_s, parent_id=None):
         # Tree 모드이므로 is_flat=False
-        node_info = self._get_processed_node_data(slice_id, name, utid, depth, total_case_dur, bounds_s, parent_id, is_flat=False)
+        node_info = self._get_processed_node_data(slice_id, name, utid, depth, bounds_s, parent_id, is_flat=False)
         if not node_info or depth > 10: return None
 
         node_data = {**node_info, "children": []}
-        children_df = self._get_structural_children(self._common_api.tp_s, slice_id)
+        api = self._common_api
+        if not api: return node_data
+        children_df = self._get_structural_children(api.tp_s, slice_id)
         if children_df.empty: return node_data
 
         rel_threshold = node_info['delta_time'] * 0.15
@@ -197,7 +203,7 @@ class InsightScanDataDelegate:
         others_delta = round(max(0, (children_df['dur'].sum() / 1e6) - (significant_children['dur'].sum() / 1e6)), 1)
 
         for _, child in significant_children.iterrows():
-            child_node = self._build_recursive_node_pro(child['id'], child['name'], utid, depth + 1, max_depth, total_case_dur, bounds_s, parent_id=slice_id)
+            child_node = self._build_recursive_node_pro(child['id'], child['name'], utid, depth + 1, max_depth, bounds_s, parent_id=slice_id)
             if child_node: node_data["children"].append(child_node)
 
         if others_delta > 5.0: 
@@ -205,19 +211,21 @@ class InsightScanDataDelegate:
             
         return node_data
 
-    def _trace_inheritance_recursive(self, parent_info, utid, depth, max_depth, total_case_dur, bounds_s, out_list):
+    def _trace_inheritance_recursive(self, parent_info, utid, depth, max_depth, bounds_s, out_list):
         if depth > max_depth: return
-        children_df = self._get_structural_children(self._common_api.tp_s, parent_info['slice_id'])
+        api = self._common_api
+        if not api: return
+        children_df = self._get_structural_children(api.tp_s, parent_info['slice_id'])
         if children_df.empty:
             out_list.append(parent_info); return
         
         if (children_df['dur'].sum() / 1e6) >= (parent_info['delta_time'] * self.INHERITANCE_THRESHOLD):
             top_child = children_df.iloc[0]
             # Flat 모드이므로 is_flat=True
-            top_info = self._get_processed_node_data(top_child['id'], top_child['name'], utid, depth, total_case_dur, bounds_s, parent_id=parent_info['slice_id'], is_flat=True)
+            top_info = self._get_processed_node_data(top_child['id'], top_child['name'], utid, depth, bounds_s, parent_id=parent_info['slice_id'], is_flat=True)
             if top_info:
                 out_list.append(top_info)
-                self._trace_inheritance_recursive(top_info, utid, depth + 1, max_depth, total_case_dur, bounds_s, out_list)
+                self._trace_inheritance_recursive(top_info, utid, depth + 1, max_depth, bounds_s, out_list)
         else:
             out_list.append(parent_info)
 

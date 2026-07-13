@@ -1,25 +1,36 @@
-class BaseClient:
+from abc import ABC, abstractmethod
+from typing import Dict, Any, List, Optional
+
+class BaseClient(ABC):
  
-    def start_engine(self):
+    @abstractmethod
+    def start_engine(self) -> None:
         pass
 
-    def stop_engine(self):
+    @abstractmethod
+    def stop_engine(self) -> None:
         pass
 
-    def get_installed_models(self):
+    @abstractmethod
+    def get_installed_models(self) -> List[str]:
         pass
 
-    def set_model_name(self, model_name):
+    @abstractmethod
+    def set_model_name(self, model_name: str) -> None:
         pass
 
-    def set_api_key(self, api_key):
+    @abstractmethod
+    def set_api_key(self, api_key: str) -> None:
         pass
 
-    def get_context_size(self):
+    @abstractmethod
+    def get_context_size(self) -> int:
         pass
 
-    def request(self, context, model=None, options=None, chunk_callback=None):
+    @abstractmethod
+    def request(self, context: List[Dict[str, str]], model: Optional[str] = None, options: Optional[Dict[str, Any]] = None, chunk_callback: Optional[Any] = None) -> Dict[str, Any]:
         pass
 
-    def getInsightScanOption(self):
+    @abstractmethod
+    def get_insight_scan_option(self) -> Dict[str, Any]:
         pass

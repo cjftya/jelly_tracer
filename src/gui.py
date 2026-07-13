@@ -5,6 +5,7 @@ import time
 import tkinter as tk
 from tkinter import messagebox, filedialog
 import customtkinter as ctk
+from typing import Optional, Any, List, Dict
 
 import platform
 
@@ -49,7 +50,7 @@ class ConsoleRedirector:
 class ExecutorThread(threading.Thread):
     def __init__(
         self,
-        engine: Engine = None,
+        engine: Optional[Engine] = None,
         progress_callback=None,
         token_callback=None,
         finished_callback=None,
@@ -93,16 +94,21 @@ class ExecutorThread(threading.Thread):
                     self.progress_callback(msg, system)
 
         try:
+            eng = self.engine
             try:
-                self.token_total = self.engine.llm_requester.get_context_size()
+                if eng and eng.llm_requester:
+                    self.token_total = eng.llm_requester.get_context_size()
+                else:
+                    self.token_total = 0
             except Exception:
                 self.token_total = 0
             
-            self.engine.run(
-                output_callback=cb,
-                model_name=self.model_name,
-                mode=self.mode
-            )
+            if eng:
+                eng.run(
+                    output_callback=cb,
+                    model_name=self.model_name,
+                    mode=self.mode
+                )
         finally:
             pass
         if self.finished_callback:
@@ -145,6 +151,20 @@ class TraceGui(ctk.CTk):
             self.status_label.configure(text="⚙️ Initializing System...")
         threading.Thread(target=self._initialize_executor, daemon=True).start()
 
+    def _on_slices_ready(self, slice_info_list):
+        if hasattr(self, 'slice_spinner') and self.slice_spinner:
+            self.slice_spinner.configure(values=slice_info_list)
+            if slice_info_list:
+                self.slice_spinner.set(slice_info_list[0])
+
+    def _on_selected_incidents_ready(self, incident_list, current_choice=None):
+        if hasattr(self, 'selected_incidents_spinner') and self.selected_incidents_spinner:
+            self.selected_incidents_spinner.configure(values=incident_list)
+            if current_choice:
+                self.selected_incidents_spinner.set(current_choice)
+            elif incident_list:
+                self.selected_incidents_spinner.set(incident_list[-1])
+
     def _initialize_executor(self):
         # Disable all inputs during startup
         self.after(0, lambda: self._set_sidebar_state("disabled"))
@@ -154,8 +174,8 @@ class TraceGui(ctk.CTk):
         self.engine.start(
             output_callback=self._on_stdout_write,
             range_callback=None,
-            slice_list_widget=self.slice_spinner,
-            selected_incidents_widget=self.selected_incidents_spinner
+            on_slices_ready=self._on_slices_ready,
+            on_selected_incidents_ready=self._on_selected_incidents_ready
         )
 
         self.after(0, lambda: self.status_label.configure(text="✅ System Ready"))
@@ -831,17 +851,19 @@ class TraceGui(ctk.CTk):
             try:
                 # AI 클라이언트 초기화 및 설치된 모델 목록 가져와서 콤보박스 업데이트
                 try:
-                    self.engine.llm_requester.init_client(client_type)
-                    if api_key:
-                        self.engine.llm_requester.set_api_key(api_key)
-                    
-                    models = self.engine.llm_requester.get_installed_models()
-                    if models:
-                        self.after(0, lambda m=models: self.model_combo.configure(values=m))
-                        # 현재 선택된 모델이 목록에 없거나 기본값이면 첫 번째 모델 선택
-                        if model == "model" or model not in models:
-                            model = models[0]
-                            self.after(0, lambda m=model: self.model_combo.set(m))
+                    eng = self.engine
+                    if eng and eng.llm_requester:
+                        eng.llm_requester.init_client(client_type)
+                        if api_key:
+                            eng.llm_requester.set_api_key(api_key)
+                        
+                        models = eng.llm_requester.get_installed_models()
+                        if models:
+                            self.after(0, lambda m=models: self.model_combo.configure(values=m))
+                            # 현재 선택된 모델이 목록에 없거나 기본값이면 첫 번째 모델 선택
+                            if model == "model" or model not in models:
+                                model = models[0]
+                                self.after(0, lambda m=model: self.model_combo.set(m))
                 except Exception as e:
                     print(f"⚠️ 모델 목록 업데이트 실패: {e}")
 
@@ -980,7 +1002,9 @@ class TraceGui(ctk.CTk):
     def _on_client_change(self, client_type):
         """Update the client and reset model list."""
         try:
-            self.engine.llm_requester.init_client(client_type)
+            eng = self.engine
+            if eng and eng.llm_requester:
+                eng.llm_requester.init_client(client_type)
             # 클라이언트 바뀔 때 모델 목록 초기화
             self.model_combo.configure(values=["empty"])
             self.model_combo.set("model")

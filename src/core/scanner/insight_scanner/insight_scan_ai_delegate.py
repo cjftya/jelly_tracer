@@ -1,7 +1,7 @@
 import re
 import json
-from scanner.insight_scanner.insight_scan_prompt_values import InsightScanPromptValues
-from llm_requester import LLMRequester
+from core.scanner.insight_scanner.insight_scan_prompt_values import InsightScanPromptValues
+from llm_client.llm_requester import LLMRequester
 
 class InsightScanAIDelegate:
     def __init__(self, llm_requester: LLMRequester, output_callback):
@@ -19,7 +19,7 @@ class InsightScanAIDelegate:
 
             raw_res = self.llm_requester.request(
                 context=ai_context,
-                options=self.llm_requester.getInsightScanOption(),
+                options=self.llm_requester.get_insight_scan_option(),
                 chunk_callback=lambda chunk: self.llm_requester.chunk_callback(chunk, self.output_callback)
             )
             total_tokens = raw_res.get("prompt_eval_count", 0) + raw_res.get("eval_count", 0)

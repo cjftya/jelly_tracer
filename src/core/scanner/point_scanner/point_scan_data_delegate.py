@@ -1,11 +1,10 @@
 import pandas as pd
-import numpy as np
-import json
 
 class PointScanDataDelegate:
-    def __init__(self, output_callback):
+    def __init__(self, output_callback, milestone_targets=None):
         self._common_api = None
         self.output_callback = output_callback
+        self.milestone_targets = milestone_targets if milestone_targets else ['bindApplication', 'activityStart', 'activityResume', 'VisualComplete']
         self.milestones_registry = [] 
         self.normal_baseline_cache = None
         self.milestone_marks = []
@@ -15,16 +14,18 @@ class PointScanDataDelegate:
         self._common_api = common_api
 
     def calculate_common_milestones(self):
-        targets = ['bindApplication', 'activityStart', 'activityResume', 'VisualComplete']
+        targets = self.milestone_targets
         
         # 1. 데이터 수집 (Helper)
         def get_ms_dict(mode):
+            api = self._common_api
+            if not api: return {}
             try:
-                tp = self._common_api.get_trace_processor(mode)
-                upid = self._common_api.get_upid(mode)
+                tp = api.get_trace_processor(mode)
+                upid = api.get_upid(mode)
             except AttributeError:
-                tp = self._common_api.tp_n if mode == "normal" else self._common_api.tp_s
-                upid = self._common_api.upid_n if mode == "normal" else self._common_api.upid_s
+                tp = api.tp_n if mode == "normal" else api.tp_s
+                upid = api.upid_n if mode == "normal" else api.upid_s
             
             if not tp or not upid: return {}
             
@@ -224,18 +225,22 @@ class PointScanDataDelegate:
         return slow_ts
 
     def prepare_normal_baseline(self, start_ts, end_ts):
+        api = self._common_api
+        if not api: return pd.DataFrame()
         query = f"""
             SELECT DISTINCT name, AVG(dur)/1e6 as avg_ms_normal 
             FROM slice 
             WHERE ts >= {start_ts} AND ts <= {end_ts}
             GROUP BY name
         """
-        df_all_normal_names = self._common_api.tp_n.query(query).as_pandas_dataframe()
+        df_all_normal_names = api.tp_n.query(query).as_pandas_dataframe()
         return df_all_normal_names
 
     def _get_threads_by_package(self):
+        api = self._common_api
+        if not api: return {}
         # common_api에 저장된 slow 트레이스의 upid를 가져옵니다.
-        upid = self._common_api.upid_s
+        upid = api.upid_s
         
         if upid is None:
             self.output_callback("🚨 [Error] UPID for slow trace is not initialized.", True)
@@ -248,11 +253,13 @@ class PointScanDataDelegate:
             WHERE upid = {upid}
         """
         
-        df = self._common_api.tp_s.query(query).as_pandas_dataframe()
+        df = api.tp_s.query(query).as_pandas_dataframe()
         
         return df.set_index('utid')['name'].to_dict() if not df.empty else {}
 
     def _collect_delay_candidates_across_threads(self, thread_map, start_s, end_s, start_n, end_n):
+        api = self._common_api
+        if not api: return []
         target_utids = ",".join(map(str, thread_map.keys()))
         
         query_slow = f"""
@@ -263,7 +270,7 @@ class PointScanDataDelegate:
             AND s.ts >= {start_s} AND (s.ts + s.dur) <= {end_s}
             ORDER BY s.dur DESC LIMIT 100
         """
-        df_slow = self._common_api.tp_s.query(query_slow).as_pandas_dataframe()
+        df_slow = api.tp_s.query(query_slow).as_pandas_dataframe()
         if df_slow.empty: return []
 
        # Normal 트레이스 대조군 데이터 확보 (JOIN을 사용하여 성능과 가독성 확보)
@@ -275,12 +282,12 @@ class PointScanDataDelegate:
             FROM slice s
             JOIN thread_track tt ON s.track_id = tt.id
             JOIN thread t ON tt.utid = t.utid
-            WHERE t.upid = {self._common_api.upid_n}
+            WHERE t.upid = {api.upid_n}
             AND s.ts >= {start_n} AND (s.ts + s.dur) <= {end_n}
             AND s.name IN ({name_filter}) 
             GROUP BY 1
         """
-        df_normal = self._common_api.tp_n.query(query_normal).as_pandas_dataframe()
+        df_normal = api.tp_n.query(query_normal).as_pandas_dataframe()
         normal_lookup = dict(zip(df_normal['name'], df_normal['avg_ms_normal']))
 
         incident_candidates = []
@@ -316,13 +323,15 @@ class PointScanDataDelegate:
         return sorted(incident_candidates, key=lambda x: x['delay_delta_ms'], reverse=True)
 
     def _calculate_physical_metrics(self, utid, ts, dur_ns):
+        api = self._common_api
+        if not api: return {"running_ms": 0.0, "waiting_ms": 0.0}
         query = f"""
             SELECT state, SUM(dur) as dur_ns
             FROM thread_state 
             WHERE utid = {utid} AND ts >= {ts} AND (ts + dur) <= {ts + dur_ns}
             GROUP BY 1
         """
-        df = self._common_api.tp_s.query(query).as_pandas_dataframe()
+        df = api.tp_s.query(query).as_pandas_dataframe()
         if df.empty: return {"running_ms": 0.0, "waiting_ms": 0.0}
         
         running_ms = df[df['state'].isin(['Running', 'R'])]['dur_ns'].sum() / 1e6
@@ -346,7 +355,6 @@ class PointScanDataDelegate:
             
             is_independent_on_thread = True
             c_start, c_end = cand['start_timestamp'], cand['start_timestamp'] + cand['duration_ns']
-            c_utid = cand.get('utid') # collect 단계에서 utid를 넘겨줘야 함
 
             for sel in selected:
                 # 같은 스레드 내에서 시간이 겹치는 경우만 제외 (부모-자식 중복 방지)

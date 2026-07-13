@@ -1,8 +1,8 @@
 import re
 import datetime
 import json
-from scanner.insight_scanner.insight_scanner import InsightScanner
-from log import Logger
+from core.scanner.insight_scanner.insight_scanner import InsightScanner
+from util.log import Logger
 
 class DeepAnalysis:
     def __init__(self):
@@ -106,8 +106,6 @@ You MUST strictly follow this logical flow inside [[THOUGHT]] tags:
                         "flat_tree": flat_tree
                     })
 
-            total_self = sum(c['incident_meta']['self_time'] for c in incidents_result_data)
-            total_wait = sum(c['incident_meta']['wait_time'] for c in incidents_result_data)
             range_name = f"{milestone_context['start_name']} ~ {milestone_context['end_name']}"
             request_context = {
                 "metadata": {
@@ -157,10 +155,13 @@ You MUST strictly follow this logical flow inside [[THOUGHT]] tags:
             self.generate_final_report(investigation_report)
             
     def request_analysis(self, context):
-        raw_res = self.llm_requester.request(
+        llm = self.llm_requester
+        if not llm:
+            return ""
+        raw_res = llm.request(
             context=context,
-            options=self.llm_requester.getInsightScanOption(),
-            chunk_callback=lambda chunk: self.llm_requester.chunk_callback(chunk, self.output_callback)
+            options=llm.get_insight_scan_option(),
+            chunk_callback=lambda chunk: llm.chunk_callback(chunk, self.output_callback)
         )
         total_tokens = raw_res.get("prompt_eval_count", 0) + raw_res.get("eval_count", 0)
         if self.output_callback:

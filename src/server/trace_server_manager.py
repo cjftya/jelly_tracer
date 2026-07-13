@@ -19,21 +19,22 @@ class TraceServerManager:
         configs = [(9001, self.trace_n), (9002, self.trace_s)]
 
         for port, trace in configs:
+            project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
             if self.os_type == "Windows":
                 exe_path = os.path.join(
-                    os.path.dirname(__file__),
-                    "trace_server",
+                    project_root,
+                    "lib",
                     "windows",
                     "trace_processor_shell.exe",
                 )
             else:
                 exe_path = os.path.join(
-                    os.path.dirname(__file__), "trace_server", "trace_processor"
+                    project_root, "lib", "trace_processor"
                 )
                 os.chmod(exe_path, 0o755)
-            cmd = f"{exe_path} --httpd {trace} --http-port {port}"
+            cmd = [exe_path, "--httpd", trace, "--http-port", str(port)]
             proc = subprocess.Popen(
-                cmd.split(), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+                cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
             )
             self.procs.append(proc)
 
@@ -43,16 +44,17 @@ class TraceServerManager:
     def export_db(self, db_path):
         def export_to_sqlite(trace_path, db_path):
             exe_path = None
+            project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
             if self.os_type == "Windows":
                 exe_path = os.path.join(
-                    os.path.dirname(__file__),
-                    "trace_server",
+                    project_root,
+                    "lib",
                     "windows",
                     "trace_processor_shell.exe",
                 )
             else:
                 exe_path = os.path.join(
-                    os.path.dirname(__file__), "trace_server", "trace_processor"
+                    project_root, "lib", "trace_processor"
                 )
                 os.chmod(exe_path, 0o755)
 
@@ -94,4 +96,5 @@ class TraceServerManager:
                     capture_output=True,
                     text=True
                 )
+            self.procs.clear()
             print("✅ Complete")

@@ -5,11 +5,12 @@ import signal
 import platform
 from ollama import Client
 from llm_client.base_client import BaseClient
+from typing import Dict, Any, List, Optional
 
 
 class OllamaManager(BaseClient):
     def __init__(self):
-        self.__process = None 
+        self.__process: Optional[subprocess.Popen] = None 
         self.os_type = platform.system()
         self.local_url = "127.0.0.1"
         self.test_url = "192.168.45.171"
@@ -26,56 +27,78 @@ class OllamaManager(BaseClient):
             "low_vram": True
         }
 
-    def getInsightScanOption(self):
+    def get_insight_scan_option(self) -> Dict[str, Any]:
         return self.__default_options.copy()
 
-    def get_installed_models(self):
+    def get_installed_models(self) -> List[str]:
         client = Client(host=self.base_url)
         response = client.list()
-        self.model_names = [model.model for model in response.models]
+        self.model_names = [model.model for model in response.models if model.model]
         return self.model_names
 
-    def set_model_name(self, model_name):
+    def set_model_name(self, model_name: str) -> None:
         self.__model_name = model_name
 
-    def set_api_key(self, api_key):
+    def set_api_key(self, api_key: str) -> None:
         # Ollama usually doesn't need an API key for local use, but we keep the method for consistency
         pass
 
-    def get_context_size(self):
+    def get_context_size(self) -> int:
         return 16384
 
     def __str__(self):
         return f"OllamaManager(base_url={self.base_url}, model={self.__model_name})"
 
-    def request(self, context, model=None, options=None, chunk_callback=None):
+    def request(self, context: List[Dict[str, str]], model: Optional[str] = None, options: Optional[Dict[str, Any]] = None, chunk_callback: Optional[Any] = None) -> Dict[str, Any]:
         client = Client(host=self.base_url)
         op = options if options else self.__default_options.copy()
         
-        response_stream = client.chat(
-            model=model if model else self.__model_name,
-            messages=context,
-            options=op,
-            stream=True,
-            keep_alive=0
-        )
+        # 1. 사용할 모델 확정 (None 방어)
+        temp_model = model if model else self.__model_name
+        target_model: str = temp_model if temp_model else ""
+        if not target_model:
+            installed = self.model_names if self.model_names else self.get_installed_models()
+            target_model = installed[0] if installed else "gemma-3-12b-it"
 
-        full_response = {"message": {"content": ""}}
-        for chunk in response_stream:
-            if "message" in chunk and "content" in chunk["message"]:
-                content = chunk["message"]["content"]
-                full_response["message"]["content"] += content
-                if chunk_callback:
-                    chunk_callback(content)
+        try:
+            response_stream = client.chat(
+                model=target_model,
+                messages=context,  # type: ignore
+                options=op,
+                stream=True,
+                keep_alive=0
+            )
 
-            if "prompt_eval_count" in chunk:
-                full_response["prompt_eval_count"] = chunk["prompt_eval_count"]
-            if "eval_count" in chunk:
-                full_response["eval_count"] = chunk["eval_count"]
+            full_response = {
+                "message": {"content": ""},
+                "prompt_eval_count": 0,
+                "eval_count": 0,
+                "error": None
+            }
+            for chunk in response_stream:
+                chunk_dict: Any = chunk
+                if "message" in chunk_dict and "content" in chunk_dict["message"]:
+                    content = chunk_dict["message"]["content"]
+                    full_response["message"]["content"] += content
+                    if chunk_callback:
+                        chunk_callback(content)
 
-        return full_response
+                if "prompt_eval_count" in chunk_dict:
+                    full_response["prompt_eval_count"] = chunk_dict["prompt_eval_count"]
+                if "eval_count" in chunk_dict:
+                    full_response["eval_count"] = chunk_dict["eval_count"]
 
-    def start_engine(self):
+            return full_response
+        except Exception as e:
+            print(f"🚨 [Ollama Error] {e}")
+            return {
+                "message": {"content": ""},
+                "prompt_eval_count": 0,
+                "eval_count": 0,
+                "error": f"Error: {str(e)}"
+            }
+
+    def start_engine(self) -> None:
         self.stop_engine() 
         
         print("🚀 Initializing LLM Analysis Environment...")
@@ -98,7 +121,7 @@ class OllamaManager(BaseClient):
         time.sleep(5)
         print("✅ Complete")
 
-    def stop_engine(self):
+    def stop_engine(self) -> None:
         print("🚀 Cleaning up LLM Session...")
         if self.__process:
             self.__process.terminate()

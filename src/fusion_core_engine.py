@@ -1,14 +1,13 @@
 import gc
 import threading
-from scanner.point_scanner.point_scanner import PointScanner
-from scanner.point_scanner.point_scan_ui import PointScanUI
-from scanner.insight_scanner.insight_scanner import InsightScanner
-from analysis.fast_analysis import FastAnalysis
-from analysis.deep_analysis import DeepAnalysis
-from common_api import CommonAPI
-from log import Logger
+from core.scanner.point_scanner.point_scanner import PointScanner
+from point_scan_ui import PointScanUI
+from core.scanner.insight_scanner.insight_scanner import InsightScanner
+from core.analysis.fast_analysis import FastAnalysis
+from core.analysis.deep_analysis import DeepAnalysis
+from core.common_api import CommonAPI
+from util.log import Logger
 
-from scanner.insight_scanner.ai_data_generator import AIDataGenerator
 
 class FusionCoreEngine:
     def __init__(self):
@@ -29,19 +28,24 @@ class FusionCoreEngine:
         self.mode = None
 
         self.selected_collected_data = None
-        self.slice_list_widget = None
-        self.selected_incidents_widget = None
+        self.on_slices_ready = None
+        self.on_selected_incidents_ready = None
+        self.selected_incidents_list = []
+        self.milestone_targets = None
         
         self.common_api = None
 
-        # self.ai_data_generator = None
+    def _output(self, message, is_error=False):
+        if self.output_callback:
+            self.output_callback(message, is_error)
 
-    def start(self, llm_requester, output_callback, range_callback=None, slice_list_widget=None, selected_incidents_widget=None):
+    def start(self, llm_requester, output_callback, range_callback=None, on_slices_ready=None, on_selected_incidents_ready=None, milestone_targets=None):
         self.output_callback = output_callback
         self.llm_requester = llm_requester
         self.range_callback = range_callback
-        self.slice_list_widget = slice_list_widget
-        self.selected_incidents_widget = selected_incidents_widget
+        self.on_slices_ready = on_slices_ready
+        self.on_selected_incidents_ready = on_selected_incidents_ready
+        self.milestone_targets = milestone_targets
 
     def load(self, trace_normal, trace_slow, target_package, chart_canvas=None):
         self.chart_canvas = chart_canvas
@@ -49,16 +53,8 @@ class FusionCoreEngine:
         self.trace_slow = trace_slow
         self.target_package = target_package
         self.common_api = CommonAPI(trace_normal, trace_slow, target_package)
-
-        # slice_info_list = [
-        #     {"name": 'activityStart', "delay_ms": 204} , 
-        #     {"name": 'initAppOnBg', "delay_ms": 40} ,
-        #     {"name": 'query#getAlbumCursor', "delay_ms": 70} , 
-        #     {"name": 'bindApplication', "delay_ms": 54}
-        # ]
-        # self.ai_data_generator = AIDataGenerator(slice_info_list)
         
-        self.point_scanner.start(self.common_api, self.target_package, self.llm_requester, self.output_callback)
+        self.point_scanner.start(self.common_api, self.target_package, self.llm_requester, self.output_callback, self.milestone_targets)
 
         if self.range_callback:
             self.range_callback(self.point_scanner.milestone_names)
@@ -82,18 +78,16 @@ class FusionCoreEngine:
         if self.selected_collected_data:
             selected_incidents = self.selected_collected_data["incidents"]
 
-        if self.slice_list_widget:
+        if self.on_slices_ready:
             if len(selected_incidents) > 0:
                 incidents_slice_info = [f"[{i['slice_id']}] {i['slice_name']} ({i['delay_delta_ms']})" for i in selected_incidents]
-                self.slice_list_widget.configure(values=incidents_slice_info)
-                self.slice_list_widget.set(incidents_slice_info[0])
+                self.on_slices_ready(incidents_slice_info)
             else:
-                self.slice_list_widget.configure(values=["No incidents found"])
-                self.slice_list_widget.set("No incidents found")
+                self.on_slices_ready(["No incidents found"])
 
-        if self.selected_incidents_widget:
-            self.selected_incidents_widget.configure(values=["Selected Incidents"])
-            self.selected_incidents_widget.set("Selected Incidents")
+        self.selected_incidents_list = ["Selected Incidents"]
+        if self.on_selected_incidents_ready:
+            self.on_selected_incidents_ready(self.selected_incidents_list, "Selected Incidents")
 
     def draw_ui(self, chart_canvas):
         if self.point_scanner.milestones and len(self.point_scanner.milestones) >= 2:
@@ -102,7 +96,7 @@ class FusionCoreEngine:
             else:
                 self.point_scan_ui.draw(chart_canvas, self.selected_collected_data)
                 
-        self.output_callback("Completed drawing chart UI")
+        self._output("Completed drawing chart UI")
 
     def on_chart_view_drag_start(self, event, chart_canvas):
         self.point_scan_ui.on_chart_view_drag_start(event, chart_canvas)
@@ -122,20 +116,19 @@ class FusionCoreEngine:
             self.draw_ui(self.chart_canvas)
 
     def on_selected_incident(self, choice):
-        if self.selected_incidents_widget:
-            if choice == "No incidents found":
-                return
-                
-            current_values = list(self.selected_incidents_widget.cget("values"))
+        if choice == "No incidents found":
+            return
             
-            if current_values == ["Selected Incidents"]:
-                current_values = [choice]
-            else:
-                if choice not in current_values:
-                    current_values.append(choice)
-            
-            self.selected_incidents_widget.configure(values=current_values)
-            self.selected_incidents_widget.set(choice)
+        if self.selected_incidents_list == ["Selected Incidents"] or not self.selected_incidents_list:
+            current_values = [choice]
+        else:
+            current_values = self.selected_incidents_list.copy()
+            if choice not in current_values:
+                current_values.append(choice)
+        
+        self.selected_incidents_list = current_values
+        if self.on_selected_incidents_ready:
+            self.on_selected_incidents_ready(self.selected_incidents_list, choice)
 
     def run(self, output_callback=None, mode=None):
         if output_callback:
@@ -148,13 +141,16 @@ class FusionCoreEngine:
             self.deep_analysis.start(self.common_api, self.target_package, self.llm_requester, self.output_callback)
 
         if self.selected_collected_data is None:
-            self.output_callback("⚠️ [Error] Collected data is missing. Cannot proceed.", True)
+            self._output("⚠️ [Error] Collected data is missing. Cannot proceed.", True)
             return
 
-        # Logger.log(self.selected_collected_data)
-        current_values = list(self.selected_incidents_widget.cget("values"))
+        if not self.selected_incidents_list or self.selected_incidents_list == ["Selected Incidents"]:
+            self._output("⚠️ [Error] No incidents selected. Cannot proceed.", True)
+            return
+
+        current_values = self.selected_incidents_list
         if current_values == ["Selected Incidents"]:
-            self.output_callback("⚠️ [Error] No incidents selected. Cannot proceed.", True)
+            self._output("⚠️ [Error] No incidents selected. Cannot proceed.", True)
             return
         
         incident_map = {inc["slice_id"]: inc for inc in self.selected_collected_data["incidents"]}
@@ -185,38 +181,46 @@ class FusionCoreEngine:
             
             overall_timeline_context.append(col)
         
-        cumstomize_incidents = self.selected_collected_data.copy()
-        cumstomize_incidents["incidents"] = selected_incidents
-        cumstomize_incidents["overall_timeline_context"] = overall_timeline_context
+        customize_incidents = self.selected_collected_data.copy()
+        customize_incidents["incidents"] = selected_incidents
+        customize_incidents["overall_timeline_context"] = overall_timeline_context
         if self.is_fast_analysis():
-            self.fast_analysis.run(cumstomize_incidents, output_callback=output_callback)
+            self.fast_analysis.run(customize_incidents, output_callback=output_callback)
         elif self.is_deep_analysis():
-            self.deep_analysis.run(cumstomize_incidents, output_callback=output_callback)
+            self.deep_analysis.run(customize_incidents, output_callback=output_callback)
         
     def on_question_to_ai(self, text):
-        if not self.llm_requester or not self.output_callback:
+        llm = self.llm_requester
+        if not llm or not self.output_callback:
             return
             
         def ask():
             try:
-                self.output_callback(f"\n🧐 Question: {text}")
+                self._output(f"\n🧐 Question: {text}")
+                
+                ai_context = None
                 if self.is_fast_analysis():
                     ai_context = self.fast_analysis.ai_ask_system_context
                 elif self.is_deep_analysis():
                     ai_context = self.deep_analysis.ai_ask_system_context
+
+                if not ai_context:
+                    self._output("\n⚠️ AI: 질문을 입력하기 전에 먼저 분석(Fast/Deep Analysis)을 실행하여 결과를 받아야 합니다.", True)
+                    return
+
                 ai_context.append({
                     "role": "user", 
                     "content": f"[QUESTION] 이건 나의 질문이야. 데이터를 보고 상세히 답해줘. 답변은 꼭 한국어로 작성해줘.\n{text}"
                 })
 
-                raw_res = self.llm_requester.request(
+                raw_res = llm.request(
                     context=ai_context, 
-                    chunk_callback=lambda chunk: self.llm_requester.chunk_callback(chunk, self.output_callback)
+                    chunk_callback=lambda chunk: llm.chunk_callback(chunk, self._output)
                 )
                 full_content = raw_res.get("message", {}).get("content", "")
-                self.output_callback(f"\n✨ AI:\n{full_content}")
+                self._output(f"\n✨ AI:\n{full_content}")
             except Exception as e:
-                self.output_callback(f"\n⚠️ AI failed: {str(e)}", True)
+                self._output(f"\n⚠️ AI failed: {str(e)}", True)
                 
         threading.Thread(target=ask, daemon=True).start()
 

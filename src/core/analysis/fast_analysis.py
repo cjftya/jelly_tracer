@@ -1,15 +1,14 @@
 import json
-from scanner.insight_scanner.insight_scanner import InsightScanner
-from scanner.insight_scanner.insight_scan_prompt_values import InsightScanPromptValues
-from log import Logger
+from core.scanner.insight_scanner.insight_scanner import InsightScanner
+from core.scanner.insight_scanner.insight_scan_prompt_values import InsightScanPromptValues
 
 class FastAnalysis:
     def __init__(self):
         self.insight_scanner = InsightScanner()
         self.ai_ask_system_context = None
 
-    def start(self, common_api, target_package, ollama_manager, output_callback):
-        self.insight_scanner.start(common_api, target_package, ollama_manager, output_callback)
+    def start(self, common_api, target_package, llm_requester, output_callback):
+        self.insight_scanner.start(common_api, target_package, llm_requester, output_callback)
 
     def run(self, collected_data, output_callback):
         incidents = collected_data.get("incidents", [])

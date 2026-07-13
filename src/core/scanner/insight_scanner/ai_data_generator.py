@@ -1,3 +1,4 @@
+import datetime
 import pandas as pd
 import numpy as np
 import sqlite3
@@ -78,9 +79,11 @@ class AIDataGenerator:
                 p_holders = ",".join(["?" for _ in arg_ids])
                 args_query = f"SELECT arg_set_id, key, COALESCE(display_value, string_value, CAST(int_value AS TEXT)) as val FROM args WHERE arg_set_id IN ({p_holders})"
                 df_args_raw = self.query_to_df(args_query, arg_ids)
-                df_args_combined = df_args_raw.groupby('arg_set_id').apply(
+                df_args_combined_raw = df_args_raw.groupby('arg_set_id').apply(
                     lambda x: ", ".join(f"{k}:{v}" for k, v in zip(x['key'], x['val'])), include_groups=False
-                ).reset_index(name='arguments')
+                )
+                df_args_combined_raw.name = 'arguments'
+                df_args_combined: Any = df_args_combined_raw.reset_index()
                 df = df.merge(df_args_combined, on='arg_set_id', how='left')
             self.df_slices = df.set_index('parent_id', drop=False)
         
@@ -95,7 +98,8 @@ class AIDataGenerator:
             root_mask = (self.df_slices['id'] == s_id)
             if not root_mask.any(): continue
             root = self.df_slices[root_mask].iloc[0]
-            u_id = int(root['utid']) if pd.notnull(root['utid']) else self.utid
+            utid_val: Any = root['utid']
+            u_id = int(utid_val) if utid_val is not None and not pd.isna(utid_val) else self.utid
             tree = self._build_recursive_node(root['id'], root['name'], u_id, 1, [root['ts'], root['ts'] + root['dur']])
             if tree: reports.append(tree)
         return reports
@@ -104,19 +108,27 @@ class AIDataGenerator:
         if utid == -1 or self.df_states.empty:
             return {'self': 0, 'wait': 0, 'runnable': 0, 'io': 0, 'mutex': 0, 'cpu': -1}
         mask = (self.df_states['utid'] == utid) & (self.df_states['ts'] + self.df_states['dur'] > a_start) & (self.df_states['ts'] < a_end)
-        subset = self.df_states[mask].copy()
+        subset: Any = self.df_states[mask].copy()
         if subset.empty:
             return {'self': 0, 'wait': 0, 'runnable': 0, 'io': 0, 'mutex': 0, 'cpu': -1}
         subset['c_start'] = np.maximum(subset['ts'], a_start)
         subset['c_end'] = np.minimum(subset['ts'] + subset['dur'], a_end)
-        subset['c_dur_ms'] = (subset['c_end'] - subset['c_start']).clip(lower=0) / 1e6
+        
+        dur_series: Any = subset['c_end'] - subset['c_start']
+        subset['c_dur_ms'] = dur_series.clip(lower=0) / 1e6
+        
         top_cpu = -1
-        run_sub = subset[subset['state'].isin(['Running', 'R']) & subset['cpu'].notnull()]
+        state_mask = subset['state'].isin(['Running', 'R'])
+        cpu_mask = subset['cpu'].notnull()
+        run_sub: Any = subset[state_mask & cpu_mask]
+        
         if not run_sub.empty:
             top_cpu = int(run_sub.sort_values(by='c_dur_ms', ascending=False).iloc[0]['cpu'])
         else:
-            valid_cpu = subset[subset['cpu'].notnull()]
-            if not valid_cpu.empty: top_cpu = int(valid_cpu.iloc[-1]['cpu'])
+            valid_cpu: Any = subset[subset['cpu'].notnull()]
+            if not valid_cpu.empty: 
+                top_cpu = int(valid_cpu.iloc[-1]['cpu'])
+                
         return {
             'self': round(float(subset[subset['state'].isin(['Running', 'R'])]['c_dur_ms'].sum()), 2),
             'wait': round(float(subset[subset['state'].isin(['D', 'DK', 'S'])]['c_dur_ms'].sum()), 2),
@@ -196,7 +208,8 @@ class AIDataGenerator:
         all_processed = []
         milestone_ids = set(self.slice_ids)
         for _, row in analysis_df.iterrows():
-            u_id = int(row['utid']) if pd.notnull(row['utid']) else self.utid
+            utid_val: Any = row['utid']
+            u_id = int(utid_val) if utid_val is not None and not pd.isna(utid_val) else self.utid
             m = self._get_metrics_from_memory(u_id, row['ts'], row['ts'] + row['dur'])
             delta = round(float(row['dur'] / 1e6), 2)
             badness = delta + (m['wait'] * 2) + (m['runnable'] * 3)
@@ -215,13 +228,20 @@ class AIDataGenerator:
     def summary_context(self, app_package="Unknown"):
         milestones_tree = self.get_all_reports()
         timeline_candidates = self.get_top_candidates(limit=70)
+        
+        start_ns = self.start_ns
+        end_ns = self.end_ns
+        duration_ms = 0.0
+        if start_ns is not None and end_ns is not None:
+            duration_ms = round(float((end_ns - start_ns) / 1e6), 2)
+            
         return {
             "metadata": {
                 "investigation_target": app_package,
                 "time_range_ns": {
-                    "start": int(self.start_ns) if self.start_ns else 0,
-                    "end": int(self.end_ns) if self.end_ns else 0,
-                    "duration_ms": round(float((self.end_ns - self.start_ns) / 1e6), 2) if self.start_ns else 0
+                    "start": int(start_ns) if start_ns else 0,
+                    "end": int(end_ns) if end_ns else 0,
+                    "duration_ms": duration_ms
                 },
             },
             "deep_dive_reports": milestones_tree,
