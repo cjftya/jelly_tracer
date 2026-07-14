@@ -1,4 +1,4 @@
-from fusion_core_engine import FusionCoreEngine
+from application.fusion_core_engine import FusionCoreEngine
 from server.trace_server_manager import TraceServerManager
 from llm_client.llm_requester import LLMRequester
 from typing import Optional
@@ -32,9 +32,6 @@ class Engine:
 
     def on_selected_incident(self, choice):
         self.fusion_core_engine.on_selected_incident(choice)
-
-    def on_question_to_ai(self, text):
-        self.fusion_core_engine.on_question_to_ai(text)
 
     def stop(self):
         if self.llm_requester:
@@ -78,11 +75,6 @@ class Engine:
 
     def on_find_incidents_clicked(self):
         self.fusion_core_engine.on_find_incidents_clicked()
-
-    def export_db(self, db_path):
-        if not self.server_manager:
-            self.server_manager = TraceServerManager()
-        self.server_manager.export_db(db_path)
 
     def run(self, output_callback=None, model_name=None, mode="Fast Analysis"):
         if not self.llm_requester:

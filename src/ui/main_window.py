@@ -9,7 +9,7 @@ from typing import Optional, Any, List, Dict
 
 import platform
 
-from engine import Engine
+from application.engine import Engine
 
 # Cross-platform font configuration
 SYSTEM = platform.system()
@@ -52,7 +52,6 @@ class ExecutorThread(threading.Thread):
         self,
         engine: Optional[Engine] = None,
         progress_callback=None,
-        token_callback=None,
         finished_callback=None,
         start_m_index=0,
         end_m_index=0,
@@ -62,7 +61,6 @@ class ExecutorThread(threading.Thread):
         super().__init__(daemon=True)
         self.engine = engine
         self.progress_callback = progress_callback
-        self.token_callback = token_callback
         self.finished_callback = finished_callback
         self.start_m_index = start_m_index
         self.end_m_index = end_m_index
@@ -73,21 +71,9 @@ class ExecutorThread(threading.Thread):
         self._stop_event = threading.Event()
 
     def run(self):
-        self.token_used = 0
-        self.token_total = 0
-
         def cb(msg: str, system: bool=False):
-            if msg.startswith("\\token_zero"):
-                self.token_used = 0
-                if self.token_callback:
-                    self.token_callback(self.token_used, self.token_total)
-            elif msg.startswith("\\token"):
-                try:
-                    self.token_used += int(msg.replace("\\token", "").strip())
-                    if self.token_callback:
-                        self.token_callback(self.token_used, self.token_total)
-                except ValueError:
-                    pass
+            if msg.startswith("\\token_zero") or msg.startswith("\\token"):
+                pass
             else:
                 self.results.append(msg)
                 if self.progress_callback:
@@ -95,14 +81,6 @@ class ExecutorThread(threading.Thread):
 
         try:
             eng = self.engine
-            try:
-                if eng and eng.llm_requester:
-                    self.token_total = eng.llm_requester.get_context_size()
-                else:
-                    self.token_total = 0
-            except Exception:
-                self.token_total = 0
-            
             if eng:
                 eng.run(
                     output_callback=cb,
@@ -126,6 +104,7 @@ class TraceGui(ctk.CTk):
         self.title("Trace Analyzer")
         self.geometry("1400x800")
         self.protocol("WM_DELETE_WINDOW", self._on_close)
+        atexit.register(self._on_close)
 
         # Output Redirection (Redirect print() to System Log & Terminal)
         self.original_stdout = sys.stdout
@@ -185,9 +164,8 @@ class TraceGui(ctk.CTk):
         """Enable or disable sidebar configuration controls."""
         widgets = [
             self.package_edit, self.client_combo, self.model_combo, self.api_key_edit,
-            self.btn_load_data, self.mode_combo, self.normal_edit, self.btn_n,
-            self.slow_edit, self.btn_s, self.btn_restart,
-            self.db_path_edit, self.btn_db_path, self.btn_export
+            self.btn_load_data, self.normal_edit, self.btn_n,
+            self.slow_edit, self.btn_s, self.btn_restart
         ]
         for w in widgets:
             try:
@@ -309,29 +287,7 @@ class TraceGui(ctk.CTk):
         )
         self.btn_load_data.grid(row=8, column=0, padx=25, pady=(0, 20), sticky="ew")
 
-        # Analysis Mode Selection
-        self.mode_label = ctk.CTkLabel(
-            self.sidebar_frame,
-            text="🔍 ANALYSIS MODE",
-            font=ctk.CTkFont(size=12, weight="bold"),
-            text_color="#94A3B8",
-            anchor="w",
-        )
-        self.mode_label.grid(row=11, column=0, padx=25, pady=(15, 0), sticky="ew")
-
-        self.mode_combo = ctk.CTkOptionMenu(
-            self.sidebar_frame,
-            values=["Fast Analysis", "Deep Analysis"],
-            height=40,
-            fg_color="#21262D",
-            button_color="#30363D",
-            button_hover_color="#3D444D",
-            corner_radius=4,
-            font=ctk.CTkFont(weight="bold"),
-            dropdown_font=ctk.CTkFont(weight="bold")
-        )
-        self.mode_combo.set("Fast Analysis")
-        self.mode_combo.grid(row=12, column=0, padx=25, pady=(0, 10), sticky="ew")
+        # Separator-like padding
 
         # Separator-like padding
         self.path_label = ctk.CTkLabel(
@@ -396,59 +352,7 @@ class TraceGui(ctk.CTk):
         )
         self.btn_s.grid(row=3, column=0, sticky="ew")
 
-        # --- Export Database Section ---
-        self.export_label = ctk.CTkLabel(
-            self.sidebar_frame,
-            text="📤 EXPORT DATABASE",
-            font=ctk.CTkFont(size=13, weight="bold"),
-            text_color="#FFFFFF",
-            anchor="w",
-        )
-        self.export_label.grid(row=15, column=0, padx=25, pady=(30, 10), sticky="ew")
-
-        self.export_frame = ctk.CTkFrame(self.sidebar_frame, fg_color="transparent")
-        self.export_frame.grid(row=16, column=0, padx=25, pady=(0, 20), sticky="ew")
-        self.export_frame.grid_columnconfigure(0, weight=1)
-
-        self.db_path_edit = ctk.CTkEntry(
-            self.export_frame,
-            placeholder_text="DB export directory",
-            height=35,
-            fg_color="#0D1117",
-            border_width=0,
-            corner_radius=4,
-            font=ctk.CTkFont(weight="bold")
-        )
-        self.db_path_edit.grid(row=0, column=0, sticky="ew", pady=(0, 5))
-        self.db_path_edit.insert(0, "./")
-
-        self.btn_db_path = ctk.CTkButton(
-            self.export_frame,
-            text="Select Directory",
-            command=self._on_set_db_path,
-            height=32,
-            fg_color="#21262D",
-            border_width=0,
-            hover_color="#30363D",
-            text_color="#8B949E",
-            corner_radius=4,
-            font=ctk.CTkFont(weight="bold")
-        )
-        self.btn_db_path.grid(row=1, column=0, sticky="ew", pady=(0, 15))
-
-        self.btn_export = ctk.CTkButton(
-            self.export_frame,
-            text="EXPORT TO DB",
-            command=self._on_export_db,
-            height=42,
-            fg_color="#4285F4",
-            hover_color="#3367D6",
-            corner_radius=4,
-            border_width=0,
-            font=ctk.CTkFont(size=12, weight="bold"),
-            state="disabled"
-        )
-        self.btn_export.grid(row=2, column=0, sticky="ew")
+        # --- Restart Button Section ---
 
         # Restart Button at the bottom
         self.btn_restart = ctk.CTkButton(
@@ -502,32 +406,7 @@ class TraceGui(ctk.CTk):
         )
         self.run_button.grid(row=0, column=1, sticky="e")
 
-        # Stats Card
-        self.stats_frame = ctk.CTkFrame(
-            self.main_container,
-            corner_radius=8,
-            fg_color="#161B22",
-            border_width=0,
-        )
-        self.stats_frame.grid(row=1, column=0, sticky="ew", pady=(0, 30), padx=30)
-        self.stats_frame.grid_columnconfigure(0, weight=1)
-
-        self.token_info_frame = ctk.CTkFrame(self.stats_frame, fg_color="transparent")
-        self.token_info_frame.pack(fill="x", padx=25, pady=(20, 10))
-
-        self.token_label = ctk.CTkLabel(
-            self.token_info_frame,
-            text="Tokens: 0 / 0 (0%)",
-            font=ctk.CTkFont(family=MONO_FONT, size=12, weight="bold"),
-            text_color="#94A3B8",
-        )
-        self.token_label.pack(side="left")
-
-        self.token_bar = ctk.CTkProgressBar(
-            self.stats_frame, height=8, progress_color="#4285F4", fg_color="#21262D"
-        )
-        self.token_bar.set(0)
-        self.token_bar.pack(fill="x", padx=25, pady=(0, 20))
+        # Chart View Area (New)
 
         # Chart View Area (New)
         self.chart_frame = ctk.CTkFrame(
@@ -641,40 +520,7 @@ class TraceGui(ctk.CTk):
         )
         self.paned_window.grid(row=0, column=0, sticky="nsew", padx=0, pady=0)
 
-        # Chat Input Area (at the bottom of console_frame)
-        self.chat_input_frame = ctk.CTkFrame(self.console_frame, fg_color="#161B22", height=50)
-        self.chat_input_frame.grid(row=1, column=0, sticky="ew", padx=0, pady=0)
-        self.chat_input_frame.grid_columnconfigure(0, weight=1)
 
-        self.chat_entry = ctk.CTkEntry(
-            self.chat_input_frame,
-            placeholder_text="Ask AI about the analysis or traces...",
-            height=35,
-            fg_color="#0D1117",
-            border_color="#30363D",
-            text_color="#C9D1D9",
-            placeholder_text_color="#484F58",
-            corner_radius=6,
-            font=ctk.CTkFont(size=12),
-            state="disabled"
-        )
-        self.chat_entry.grid(row=0, column=0, sticky="ew", padx=(10, 5), pady=8)
-        self.chat_entry.bind("<Return>", lambda e: self._on_question_to_ai())
-
-        self.btn_chat_send = ctk.CTkButton(
-            self.chat_input_frame,
-            text="✉️ SEND",
-            command=self._on_question_to_ai,
-            width=80,
-            height=32,
-            fg_color="#21262D",
-            hover_color="#30363D",
-            text_color="#C9D1D9",
-            corner_radius=6,
-            font=ctk.CTkFont(size=12, weight="bold"),
-            state="disabled"
-        )
-        self.btn_chat_send.grid(row=0, column=1, sticky="w", padx=(5, 10), pady=8)
 
         # Left Pane: AI
         self.left_pane = ctk.CTkFrame(
@@ -781,40 +627,7 @@ class TraceGui(ctk.CTk):
             entry_widget.delete(0, "end")
             entry_widget.insert(0, path)
 
-    def _on_set_db_path(self):
-        path = filedialog.askdirectory(
-            title="Select DB export directory"
-        )
-        if path:
-            self.db_path_edit.delete(0, "end")
-            self.db_path_edit.insert(0, path)
 
-    def _on_export_db(self):
-        db_path = self.db_path_edit.get().strip()
-        if not db_path:
-            messagebox.showwarning("Missing path", "Please set the DB save path.")
-            return
-
-        try:
-            self.status_label.configure(text="⏳ Exporting to DB...")
-            self.btn_export.configure(state="disabled")
-            
-            # Run export in background
-            def export_task():
-                try:
-                    self.engine.export_db(db_path)
-                    self.after(0, lambda: messagebox.showinfo("Export Success", f"Analysis data successfully exported to:\n{db_path}"))
-                except Exception as e:
-                    self.after(0, lambda: messagebox.showerror("Export Error", f"Failed to export DB: {str(e)}"))
-                finally:
-                    self.after(0, lambda: self.status_label.configure(text="📦 Data Loaded - Ready"))
-                    self.after(0, lambda: self.btn_export.configure(state="normal"))
-
-            threading.Thread(target=export_task, daemon=True).start()
-            
-        except Exception as e:
-            messagebox.showerror("Export Error", f"Failed to initiate export: {str(e)}")
-            self.btn_export.configure(state="normal")
 
     def _on_load_data(self):
         """Handle trace data loading in a background thread and enable analysis controls."""
@@ -824,7 +637,6 @@ class TraceGui(ctk.CTk):
         client_type = self.client_combo.get().strip()
         model = self.model_combo.get().strip()
         api_key = self.api_key_edit.get().strip()
-        mode = self.mode_combo.get().strip()
 
         if not normal or not slow:
             messagebox.showwarning("Missing paths", "Both trace paths must be set.")
@@ -885,7 +697,6 @@ class TraceGui(ctk.CTk):
         self.btn_find_incidents.configure(state="normal")
         self.slice_spinner.configure(state="normal")
         self.selected_incidents_spinner.configure(state="normal")
-        self.btn_export.configure(state="normal")
         
         # Disable configuration inputs but keep model and mode enabled for selection
         self.package_edit.configure(state="disabled")
@@ -896,9 +707,8 @@ class TraceGui(ctk.CTk):
         self.slow_edit.configure(state="disabled")
         self.btn_s.configure(state="disabled")
         
-        # Explicitly enable model and mode for selection after load
+        # Explicitly enable model for selection after load
         self.model_combo.configure(state="normal")
-        self.mode_combo.configure(state="normal")
         
         self.status_label.configure(text="📦 Data Loaded - Ready")
         messagebox.showinfo("Load Data", f"Trace data loaded successfully. Analysis tools are now enabled.\n\nSettings are locked for this session. Use 'RESTART SYSTEM' to load different traces.")
@@ -941,15 +751,7 @@ class TraceGui(ctk.CTk):
         if hasattr(self, 'engine') and self.engine:
             self.engine.on_find_incidents_clicked()
 
-    def _on_question_to_ai(self):
-        """Send a question to AI investigator."""
-        question = self.chat_entry.get().strip()
-        if not question:
-            return
-            
-        self.chat_entry.delete(0, 'end')
-        if hasattr(self, 'engine') and self.engine:
-            self.engine.on_question_to_ai(question)
+
 
     def _on_slice_selected(self, choice):
         """Handle selection of an incident to add it to the final analysis list."""
@@ -967,14 +769,11 @@ class TraceGui(ctk.CTk):
         self.client_combo.configure(state="disabled")
         self.model_combo.configure(state="disabled")
         self.api_key_edit.configure(state="disabled")
-        self.mode_combo.configure(state="disabled")
         self.normal_edit.configure(state="disabled")
         self.btn_n.configure(state="disabled")
         self.slow_edit.configure(state="disabled")
         self.btn_s.configure(state="disabled")
         self.btn_restart.configure(state="disabled")
-        self.chat_entry.configure(state="disabled")
-        self.btn_chat_send.configure(state="disabled")
 
         # Preserve existing logs and add a separator if not empty
         for widget, title in [(self.text_edit, "AI ANALYSIS SESSION"), (self.system_edit, "SYSTEM LOG SESSION")]:
@@ -987,12 +786,11 @@ class TraceGui(ctk.CTk):
         self.realtime_status.configure(text="")  # Clear status on new run
 
         model = self.model_combo.get().strip()
-        mode = self.mode_combo.get().strip()
+        mode = "Fast Analysis"
 
         self.thread = ExecutorThread(
             engine=self.engine,
             progress_callback=self._append_line,
-            token_callback=self._update_token_usage,
             finished_callback=self._on_finished,
             model_name=model,
             mode=mode,
@@ -1065,19 +863,13 @@ class TraceGui(ctk.CTk):
             self.slice_spinner.configure(state="normal")
             self.selected_incidents_spinner.configure(state="normal")
             self.model_combo.configure(state="normal")
-            self.mode_combo.configure(state="normal")
             self.btn_restart.configure(state="normal")
-            self.chat_entry.configure(state="normal")
-            self.btn_chat_send.configure(state="normal")
             
             messagebox.showinfo("Done", "Analysis finished. Logs have been preserved. You can run another analysis or load new data.")
 
         self.after(0, finalize)
 
-    def _update_token_usage(self, used: int, total: int):
-        pct = int(used / total * 100) if total > 0 else 0
-        self.token_label.configure(text=f"Tokens: {used:,} / {total:,} ({pct}%)")
-        self.token_bar.set(used / total if total > 0 else 0)
+
 
     def _on_restart(self):
         if not messagebox.askyesno("Restart", "Restart the application? All current session data will be cleared."):
@@ -1117,7 +909,10 @@ class TraceGui(ctk.CTk):
         if hasattr(self, "original_stdout"):
             sys.stdout = self.original_stdout
 
-        self.destroy()
+        try:
+            self.destroy()
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":

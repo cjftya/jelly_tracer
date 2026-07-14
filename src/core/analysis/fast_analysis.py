@@ -5,7 +5,6 @@ from core.scanner.insight_scanner.insight_scan_prompt_values import InsightScanP
 class FastAnalysis:
     def __init__(self):
         self.insight_scanner = InsightScanner()
-        self.ai_ask_system_context = None
 
     def start(self, common_api, target_package, llm_requester, output_callback):
         self.insight_scanner.start(common_api, target_package, llm_requester, output_callback)
@@ -31,19 +30,8 @@ class FastAnalysis:
                 final_report = final_result[1]
                 thinking_text = final_result[2]
 
-                self.ai_ask_system_context = self.create_ask_ai_system_context(summary_context)
-
                 output_callback(f"\n🧠 [AI Thinking...]\n{thinking_text}\n")
                 output_callback(final_report)
 
     def stop(self):
         self.insight_scanner.stop()
-
-    def create_ask_ai_system_context(self, summary_context):
-        system_prompt = InsightScanPromptValues.getSystemPrompt(False, True)
-        string_context = json.dumps(summary_context, indent=2, ensure_ascii=False)
-        ai_context = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": f"[DATA]:\n{string_context}"},
-        ]
-        return ai_context

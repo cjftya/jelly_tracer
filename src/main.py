@@ -1,4 +1,4 @@
-from gui import TraceGui
+from ui.main_window import TraceGui
 
 if __name__ == "__main__":
     if TraceGui is not None:

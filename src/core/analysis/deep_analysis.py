@@ -10,7 +10,6 @@ class DeepAnalysis:
         self.target_package = None
         self.llm_requester = None
         self.output_callback = None
-        self.ai_ask_system_context = None
         
         self.system_prompt_template = """
 # [Role]

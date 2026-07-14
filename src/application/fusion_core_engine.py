@@ -1,11 +1,12 @@
 import gc
 import threading
-from core.scanner.point_scanner.point_scanner import PointScanner
-from point_scan_ui import PointScanUI
-from core.scanner.insight_scanner.insight_scanner import InsightScanner
-from core.analysis.fast_analysis import FastAnalysis
+
 from core.analysis.deep_analysis import DeepAnalysis
+from core.analysis.fast_analysis import FastAnalysis
 from core.common_api import CommonAPI
+from core.scanner.insight_scanner.insight_scanner import InsightScanner
+from core.scanner.point_scanner.point_scanner import PointScanner
+from ui.point_scan_view import PointScanUI
 from util.log import Logger
 
 
@@ -32,14 +33,22 @@ class FusionCoreEngine:
         self.on_selected_incidents_ready = None
         self.selected_incidents_list = []
         self.milestone_targets = None
-        
+
         self.common_api = None
 
     def _output(self, message, is_error=False):
         if self.output_callback:
             self.output_callback(message, is_error)
 
-    def start(self, llm_requester, output_callback, range_callback=None, on_slices_ready=None, on_selected_incidents_ready=None, milestone_targets=None):
+    def start(
+        self,
+        llm_requester,
+        output_callback,
+        range_callback=None,
+        on_slices_ready=None,
+        on_selected_incidents_ready=None,
+        milestone_targets=None,
+    ):
         self.output_callback = output_callback
         self.llm_requester = llm_requester
         self.range_callback = range_callback
@@ -53,26 +62,37 @@ class FusionCoreEngine:
         self.trace_slow = trace_slow
         self.target_package = target_package
         self.common_api = CommonAPI(trace_normal, trace_slow, target_package)
-        
-        self.point_scanner.start(self.common_api, self.target_package, self.llm_requester, self.output_callback, self.milestone_targets)
+
+        self.point_scanner.start(
+            self.common_api,
+            self.target_package,
+            self.llm_requester,
+            self.output_callback,
+            self.milestone_targets,
+        )
 
         if self.range_callback:
             self.range_callback(self.point_scanner.milestone_names)
 
         # Draw data initialization
         if chart_canvas and self.point_scanner.milestones:
-            self.point_scan_ui.set_info(self.point_scanner.milestones,
-                                        self.point_scanner.milestone_marks)
-        
+            self.point_scan_ui.set_info(
+                self.point_scanner.milestones, self.point_scanner.milestone_marks
+            )
+
         self.update_range_info()
 
         # Draw chart
         self.draw_ui(chart_canvas)
-    
+
     def update_range_info(self):
-        self.point_scanner.milestone_start_index = self.point_scan_ui.selected_start_index
+        self.point_scanner.milestone_start_index = (
+            self.point_scan_ui.selected_start_index
+        )
         self.point_scanner.milestone_end_index = self.point_scan_ui.selected_end_index
-        self.selected_collected_data = self.point_scanner.run(output_callback=self.output_callback)
+        self.selected_collected_data = self.point_scanner.run(
+            output_callback=self.output_callback
+        )
 
         selected_incidents = []
         if self.selected_collected_data:
@@ -80,22 +100,32 @@ class FusionCoreEngine:
 
         if self.on_slices_ready:
             if len(selected_incidents) > 0:
-                incidents_slice_info = [f"[{i['slice_id']}] {i['slice_name']} ({i['delay_delta_ms']})" for i in selected_incidents]
+                incidents_slice_info = [
+                    f"[{i['slice_id']}] {i['slice_name']} ({i['delay_delta_ms']})"
+                    for i in selected_incidents
+                ]
                 self.on_slices_ready(incidents_slice_info)
             else:
                 self.on_slices_ready(["No incidents found"])
 
         self.selected_incidents_list = ["Selected Incidents"]
         if self.on_selected_incidents_ready:
-            self.on_selected_incidents_ready(self.selected_incidents_list, "Selected Incidents")
+            self.on_selected_incidents_ready(
+                self.selected_incidents_list, "Selected Incidents"
+            )
 
     def draw_ui(self, chart_canvas):
         if self.point_scanner.milestones and len(self.point_scanner.milestones) >= 2:
-            if hasattr(chart_canvas, 'after'):
-                chart_canvas.after(0, lambda: self.point_scan_ui.draw(chart_canvas, self.selected_collected_data))
+            if hasattr(chart_canvas, "after"):
+                chart_canvas.after(
+                    0,
+                    lambda: self.point_scan_ui.draw(
+                        chart_canvas, self.selected_collected_data
+                    ),
+                )
             else:
                 self.point_scan_ui.draw(chart_canvas, self.selected_collected_data)
-                
+
         self._output("Completed drawing chart UI")
 
     def on_chart_view_drag_start(self, event, chart_canvas):
@@ -118,14 +148,17 @@ class FusionCoreEngine:
     def on_selected_incident(self, choice):
         if choice == "No incidents found":
             return
-            
-        if self.selected_incidents_list == ["Selected Incidents"] or not self.selected_incidents_list:
+
+        if (
+            self.selected_incidents_list == ["Selected Incidents"]
+            or not self.selected_incidents_list
+        ):
             current_values = [choice]
         else:
             current_values = self.selected_incidents_list.copy()
             if choice not in current_values:
                 current_values.append(choice)
-        
+
         self.selected_incidents_list = current_values
         if self.on_selected_incidents_ready:
             self.on_selected_incidents_ready(self.selected_incidents_list, choice)
@@ -133,18 +166,30 @@ class FusionCoreEngine:
     def run(self, output_callback=None, mode=None):
         if output_callback:
             self.output_callback = output_callback
-        
+
         self.mode = mode
         if self.is_fast_analysis():
-            self.fast_analysis.start(self.common_api, self.target_package, self.llm_requester, self.output_callback)
+            self.fast_analysis.start(
+                self.common_api,
+                self.target_package,
+                self.llm_requester,
+                self.output_callback,
+            )
         elif self.is_deep_analysis():
-            self.deep_analysis.start(self.common_api, self.target_package, self.llm_requester, self.output_callback)
+            self.deep_analysis.start(
+                self.common_api,
+                self.target_package,
+                self.llm_requester,
+                self.output_callback,
+            )
 
         if self.selected_collected_data is None:
             self._output("⚠️ [Error] Collected data is missing. Cannot proceed.", True)
             return
 
-        if not self.selected_incidents_list or self.selected_incidents_list == ["Selected Incidents"]:
+        if not self.selected_incidents_list or self.selected_incidents_list == [
+            "Selected Incidents"
+        ]:
             self._output("⚠️ [Error] No incidents selected. Cannot proceed.", True)
             return
 
@@ -152,8 +197,10 @@ class FusionCoreEngine:
         if current_values == ["Selected Incidents"]:
             self._output("⚠️ [Error] No incidents selected. Cannot proceed.", True)
             return
-        
-        incident_map = {inc["slice_id"]: inc for inc in self.selected_collected_data["incidents"]}
+
+        incident_map = {
+            inc["slice_id"]: inc for inc in self.selected_collected_data["incidents"]
+        }
         selected_incidents = []
         for val in current_values:
             if val.startswith("[") and "]" in val:
@@ -170,17 +217,17 @@ class FusionCoreEngine:
             col = {}
             col["slice_id"] = int(inc["slice_id"])
             col["slice_name"] = inc["slice_name"]
-            col["thread_name"] = inc.get("thread_name", "Unknown") 
-            
+            col["thread_name"] = inc.get("thread_name", "Unknown")
+
             start_ms = inc["start_timestamp"] / 1000000.0
             dur_ms = inc["duration_ns"] / 1000000.0
-            
+
             col["start_ms"] = round(start_ms, 2)
             col["dur_ms"] = round(dur_ms, 2)
             col["end_ms"] = round(start_ms + dur_ms, 2)
-            
+
             overall_timeline_context.append(col)
-        
+
         customize_incidents = self.selected_collected_data.copy()
         customize_incidents["incidents"] = selected_incidents
         customize_incidents["overall_timeline_context"] = overall_timeline_context
@@ -188,41 +235,6 @@ class FusionCoreEngine:
             self.fast_analysis.run(customize_incidents, output_callback=output_callback)
         elif self.is_deep_analysis():
             self.deep_analysis.run(customize_incidents, output_callback=output_callback)
-        
-    def on_question_to_ai(self, text):
-        llm = self.llm_requester
-        if not llm or not self.output_callback:
-            return
-            
-        def ask():
-            try:
-                self._output(f"\n🧐 Question: {text}")
-                
-                ai_context = None
-                if self.is_fast_analysis():
-                    ai_context = self.fast_analysis.ai_ask_system_context
-                elif self.is_deep_analysis():
-                    ai_context = self.deep_analysis.ai_ask_system_context
-
-                if not ai_context:
-                    self._output("\n⚠️ AI: 질문을 입력하기 전에 먼저 분석(Fast/Deep Analysis)을 실행하여 결과를 받아야 합니다.", True)
-                    return
-
-                ai_context.append({
-                    "role": "user", 
-                    "content": f"[QUESTION] 이건 나의 질문이야. 데이터를 보고 상세히 답해줘. 답변은 꼭 한국어로 작성해줘.\n{text}"
-                })
-
-                raw_res = llm.request(
-                    context=ai_context, 
-                    chunk_callback=lambda chunk: llm.chunk_callback(chunk, self._output)
-                )
-                full_content = raw_res.get("message", {}).get("content", "")
-                self._output(f"\n✨ AI:\n{full_content}")
-            except Exception as e:
-                self._output(f"\n⚠️ AI failed: {str(e)}", True)
-                
-        threading.Thread(target=ask, daemon=True).start()
 
     def stop(self):
         if self.point_scanner:
