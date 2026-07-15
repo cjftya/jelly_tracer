@@ -1,20 +1,20 @@
-from typing import Optional, List, Any
+from typing import Any, List, Optional
+
 
 class BaseScanner:
     def __init__(self):
-        self.output_callback = None
+        self.event_poster = None
         self.llm_requester = None
         self.target_package = None
 
-    def start(self, common_api, target_package, llm_requester, output_callback):
+    def start(self, common_api, target_package, llm_requester, event_poster):
         self.target_package = target_package
-        self.output_callback = output_callback
+        self.event_poster = event_poster
         self.llm_requester = llm_requester
 
     def stop(self):
         self.llm_requester = None
-        self.output_callback = None
+        self.event_poster = None
 
-    def run(self, output_callback=None) -> Optional[List[Any]]:
-        if output_callback:
-            self.output_callback = output_callback
+    def run(self) -> Optional[List[Any]]:
+        pass

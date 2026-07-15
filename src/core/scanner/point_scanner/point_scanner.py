@@ -1,57 +1,72 @@
-from core.scanner.point_scanner.point_scan_data_delegate import PointScanDataDelegate
+from typing import Any, Dict, List, Optional
+
 from core.scanner.base_scanner import BaseScanner
+from core.scanner.point_scanner.point_scan_data_delegate import PointScanDataDelegate
 from util.log import Logger
-from typing import Optional, Any, Dict, List
+
 
 class PointScanner(BaseScanner):
     def __init__(self):
         super().__init__()
         self.data_provider: Optional[PointScanDataDelegate] = None
-        
+
         self.milestones: Optional[List[Dict[str, Any]]] = None
         self.milestone_names: Optional[List[str]] = None
         self.milestone_marks: Optional[List[Any]] = None
         self.milestone_start_index = -1
         self.milestone_end_index = -1
 
-    def start(self, common_api, target_package, llm_requester, output_callback, milestone_targets=None):
-        super().start(common_api, target_package, llm_requester, output_callback)
+    def start(
+        self,
+        common_api,
+        target_package,
+        llm_requester,
+        event_poster,
+        milestone_targets=None,
+    ):
+        super().start(common_api, target_package, llm_requester, event_poster)
 
-        self.data_provider = PointScanDataDelegate(output_callback, milestone_targets)
+        self.data_provider = PointScanDataDelegate(event_poster, milestone_targets)
         self.data_provider.init(common_api)
 
         self.milestones = self.data_provider.calculate_common_milestones()
         if self.data_provider.milestones_registry:
-            self.milestone_names = [m['name'] for m in self.data_provider.milestones_registry]
+            self.milestone_names = [
+                m["name"] for m in self.data_provider.milestones_registry
+            ]
         self.milestone_marks = self.data_provider.milestone_marks
 
     def stop(self):
         super().stop()
 
-    def run(self, output_callback=None) -> Any:
-        super().run(output_callback)
+    def run(self) -> Any:
+        super().run()
         if not self.data_provider:
             return None
 
-        if output_callback:
-            self.data_provider.output_callback = output_callback
+        self.data_provider.event_poster = self.event_poster
 
-        if self.output_callback:
-            self.output_callback(f"🚀 [Point-Scan] Global Investigation Started: {self.target_package}")
-        
+        if self.event_poster:
+            self.event_poster.log(
+                f"🚀 [Point-Scan] Global Investigation Started: {self.target_package}"
+            )
+
         # ---------------------------------------------------------
         # Step 1: 전수 조사 실행 (Global Point-Scan)
         # ---------------------------------------------------------
         point_scan_result = self.data_provider.run_point_scan(
             target_package_name=self.target_package,
             start_milestone_index=self.milestone_start_index,
-            end_milestone_index=self.milestone_end_index
+            end_milestone_index=self.milestone_end_index,
         )
 
         # 분석할 만한 유의미한 데이터가 없는 경우 종료
         if not point_scan_result or not point_scan_result.get("incidents"):
-            if self.output_callback:
-                self.output_callback("⚠️ [Notice] No significant delay incidents found in current scope.", True)
+            if self.event_poster:
+                self.event_poster.log(
+                    "⚠️ [Notice] No significant delay incidents found in current scope.",
+                    True,
+                )
             return None
 
         # ---------------------------------------------------------
@@ -59,36 +74,42 @@ class PointScanner(BaseScanner):
         # ---------------------------------------------------------
         final_master_data = self.collect_analyze_data(point_scan_result)
 
-        if self.output_callback:
-            self.output_callback("✅ [Point-Scan] Evidence collection concluded. Ready for Analysis Phase.\n\n")
+        if self.event_poster:
+            self.event_poster.log(
+                "✅ [Point-Scan] Evidence collection concluded. Ready for Analysis Phase.\n\n"
+            )
 
         return final_master_data
 
     def collect_analyze_data(self, point_scan_result):
         if not self.milestones:
             return {}
-            
+
         # 1. 마일스톤 좌표 확보
         start_milestone_data = self.milestones[self.milestone_start_index]
         end_milestone_data = self.milestones[self.milestone_end_index]
-        
+
         # 2. 최종 마스터 데이터 조립
         master_data = {
             "milestone_info": {
-                "start_name": start_milestone_data['name'],
-                "end_name": end_milestone_data['name'],
-                "start_ts_ns": start_milestone_data['ts_s_start'], 
-                "end_ts_ns": end_milestone_data['ts_s_end'],
+                "start_name": start_milestone_data["name"],
+                "end_name": end_milestone_data["name"],
+                "start_ts_ns": start_milestone_data["ts_s_start"],
+                "end_ts_ns": end_milestone_data["ts_s_end"],
                 "start_index": self.milestone_start_index,
                 "end_index": self.milestone_end_index,
-                "total_delay_ms": point_scan_result['analysis_metadata']['total_delay_ms']
+                "total_delay_ms": point_scan_result["analysis_metadata"][
+                    "total_delay_ms"
+                ],
             },
-            "normal_baseline": point_scan_result['normal_baseline'],
-            "analysis_metadata": point_scan_result['analysis_metadata'],
-            "incidents": point_scan_result['incidents']
+            "normal_baseline": point_scan_result["normal_baseline"],
+            "analysis_metadata": point_scan_result["analysis_metadata"],
+            "incidents": point_scan_result["incidents"],
         }
 
         # 로깅: 수집된 사건의 요약 정보를 기록
-        Logger.log(f"PointScan Results Collected: {len(master_data['incidents'])} incidents found.")
-        
+        Logger.log(
+            f"PointScan Results Collected: {len(master_data['incidents'])} incidents found."
+        )
+
         return master_data

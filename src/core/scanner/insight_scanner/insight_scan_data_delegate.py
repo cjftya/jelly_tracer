@@ -2,9 +2,9 @@ import datetime
 import pandas as pd
 
 class InsightScanDataDelegate:
-    def __init__(self, output_callback):
+    def __init__(self, event_poster):
         self._common_api = None
-        self.output_callback = output_callback
+        self.event_poster = event_poster
         self.package = None
         # 자식들이 부모 지연의 70% 이상을 점유해야 '의미 있는 상속'으로 간주
         self.INHERITANCE_THRESHOLD = 0.7 
@@ -32,7 +32,7 @@ class InsightScanDataDelegate:
             dur_ns = int(collected_data.get("duration_ns") or 0)
             end_ns = start_ns + dur_ns
         except (ValueError, TypeError):
-            self.output_callback("🚨 [Error] Invalid target data format.", True)
+            self.event_poster.log("🚨 [Error] Invalid target data format.", True)
             return None
 
         api = self._common_api
@@ -50,7 +50,7 @@ class InsightScanDataDelegate:
         s_metrics = self._get_node_metrics_by_id(api.tp_s, utid_s, t_id, start_ns, end_ns)
         total_case_duration = s_metrics['dur']
 
-        self.output_callback(f"🎯 [Investigation Started] {root_name} | Baseline: {total_case_duration:.1f}ms", True)
+        self.event_poster.log(f"🎯 [Investigation Started] {root_name} | Baseline: {total_case_duration:.1f}ms", True)
 
         if is_flat:
             candidates = []

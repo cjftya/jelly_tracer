@@ -1,9 +1,9 @@
 import pandas as pd
 
 class PointScanDataDelegate:
-    def __init__(self, output_callback, milestone_targets=None):
+    def __init__(self, event_poster, milestone_targets=None):
         self._common_api = None
-        self.output_callback = output_callback
+        self.event_poster = event_poster
         self.milestone_targets = milestone_targets if milestone_targets else ['bindApplication', 'activityStart', 'activityResume', 'VisualComplete']
         self.milestones_registry = [] 
         self.normal_baseline_cache = None
@@ -119,14 +119,14 @@ class PointScanDataDelegate:
 
         self.milestone_marks = core_milestones # 📍 마커용 데이터 별도 보관
 
-        if self.output_callback:
-            self.output_callback(f"\n✅ [COMPLETED] {num_bins} segments created with full time-mapping.")
+        if self.event_poster:
+            self.event_poster.log(f"\n✅ [COMPLETED] {num_bins} segments created with full time-mapping.")
 
         return self.milestones_registry
 
     def run_point_scan(self, target_package_name, start_milestone_index, end_milestone_index, coverage_target_ratio=0.8):
         if not self.milestones_registry:
-            self.output_callback("🚨 [Error] Milestones have not been initialized.", True)
+            self.event_poster.log("🚨 [Error] Milestones have not been initialized.", True)
             return None
 
         # 1. 수사 범위(Time Window) 확정
@@ -142,17 +142,17 @@ class PointScanDataDelegate:
 
         # 이 구간의 총 추가 지연 시간(ms)
         total_observed_delay_ms = sum(item['delay_ms'] for item in selected_data)
-        self.output_callback(f"Range: {start_milestone_data['name']} ({start_milestone_index}) ~ {end_milestone_data['name']} ({end_milestone_index})", True)
-        self.output_callback(f"Total Observed Delay: {total_observed_delay_ms:.1f}ms\n", True)
+        self.event_poster.log(f"Range: {start_milestone_data['name']} ({start_milestone_index}) ~ {end_milestone_data['name']} ({end_milestone_index})", True)
+        self.event_poster.log(f"Total Observed Delay: {total_observed_delay_ms:.1f}ms\n", True)
         
-        self.output_callback(f"🔍 [Point-Scan] Investigating {total_observed_delay_ms:.1f}ms delay between {start_milestone_data['name']} and {end_milestone_data['name']}", True)
+        self.event_poster.log(f"🔍 [Point-Scan] Investigating {total_observed_delay_ms:.1f}ms delay between {start_milestone_data['name']} and {end_milestone_data['name']}", True)
 
         self.normal_baseline_cache = self.prepare_normal_baseline(scan_range_start_ts_normal, scan_range_end_ts_normal)
 
         # 2. 패키지 소속 모든 스레드 식별
         package_thread_map = self._get_threads_by_package()
         if not package_thread_map:
-            self.output_callback(f"🚨 [Error] No threads found for package: {target_package_name}", True)
+            self.event_poster.log(f"🚨 [Error] No threads found for package: {target_package_name}", True)
             return None
 
         # 3. 전수 조사: 모든 스레드에서 지연 후보군 수집
@@ -190,9 +190,9 @@ class PointScanDataDelegate:
             })
         
         if total_observed_delay_ms > 0:
-            self.output_callback(f"✅ [Point-Scan] Found {len(final_incidents)} incidents covering {captured_delay_sum_ms/total_observed_delay_ms:.1%} of delay.", True)
+            self.event_poster.log(f"✅ [Point-Scan] Found {len(final_incidents)} incidents covering {captured_delay_sum_ms/total_observed_delay_ms:.1%} of delay.", True)
         else:
-            self.output_callback(f"✅ [Point-Scan] Found {len(final_incidents)} incidents.", True)
+            self.event_poster.log(f"✅ [Point-Scan] Found {len(final_incidents)} incidents.", True)
 
         return {
             "analysis_metadata": {
@@ -243,7 +243,7 @@ class PointScanDataDelegate:
         upid = api.upid_s
         
         if upid is None:
-            self.output_callback("🚨 [Error] UPID for slow trace is not initialized.", True)
+            self.event_poster.log("🚨 [Error] UPID for slow trace is not initialized.", True)
             return {}
 
         # 서브쿼리 없이 직접 upid로 필터링합니다.

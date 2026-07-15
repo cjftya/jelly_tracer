@@ -1,16 +1,18 @@
-import re
 import datetime
 import json
+import re
+
 from core.scanner.insight_scanner.insight_scanner import InsightScanner
 from util.log import Logger
+
 
 class DeepAnalysis:
     def __init__(self):
         self.insight_scanner = InsightScanner()
         self.target_package = None
         self.llm_requester = None
-        self.output_callback = None
-        
+        self.event_poster = None
+
         self.system_prompt_template = """
 # [Role]
 You are the "Chief Android System Performance Forensic Inspector". 
@@ -45,16 +47,18 @@ You MUST strictly follow this logical flow inside [[THOUGHT]] tags:
 - **Fact-Only**: Use only the provided metadata and incident data.
         """
 
-    def start(self, common_api, target_package, llm_requester, output_callback):
+    def start(self, common_api, target_package, llm_requester, event_poster):
         self.target_package = target_package
-        self.insight_scanner.start(common_api, target_package, llm_requester, output_callback)
+        self.insight_scanner.start(
+            common_api, target_package, llm_requester, event_poster
+        )
         self.llm_requester = llm_requester
-        self.output_callback = output_callback
+        self.event_poster = event_poster
 
     def stop(self):
         self.insight_scanner.stop()
 
-    def run(self, collected_data, output_callback):
+    def run(self, collected_data, event_poster):
         incidents = collected_data.get("incidents", [])
         milestone_context = collected_data.get("milestone_info", {})
         captured_delay_ms = collected_data.get("captured_delay_ms", 0)
@@ -76,83 +80,101 @@ You MUST strictly follow this logical flow inside [[THOUGHT]] tags:
                     "milestones": milestone_context,
                     "normal_baseline": collected_data.get("normal_baseline", None),
                     "fact_only": True,
-                    "overall_timeline_context": overall_timeline_context
+                    "overall_timeline_context": overall_timeline_context,
                 }
 
                 self.insight_scanner.collected_data = primary_incident_data
-                final_result = self.insight_scanner.run(output_callback=output_callback)
-                
+                final_result = self.insight_scanner.run()
+
                 if final_result:
                     summary_context = final_result[0]
                     ai_analyst_text = final_result[3]
                     flat_tree = summary_context.get("prime_suspects_flat", [])
 
-                    if not flat_tree: continue
+                    if not flat_tree:
+                        continue
                     root = flat_tree[0]
-                    
+
                     incident_meta = {
                         "delta_time": root.get("delta_time", 0),
                         "self_time": root.get("self_time", 0),
                         "wait_time": root.get("wait_time", 0),
-                        "mri_stats": root.get("physical_stats", {})
+                        "mri_stats": root.get("physical_stats", {}),
                     }
 
-                    incidents_result_data.append({
-                        "set_no": idx + 1,
-                        "case_name": incident.get("slice_name"),
-                        "ai_summary": ai_analyst_text,
-                        "incident_meta": incident_meta,
-                        "flat_tree": flat_tree
-                    })
+                    incidents_result_data.append(
+                        {
+                            "set_no": idx + 1,
+                            "case_name": incident.get("slice_name"),
+                            "ai_summary": ai_analyst_text,
+                            "incident_meta": incident_meta,
+                            "flat_tree": flat_tree,
+                        }
+                    )
 
-            range_name = f"{milestone_context['start_name']} ~ {milestone_context['end_name']}"
+            range_name = (
+                f"{milestone_context['start_name']} ~ {milestone_context['end_name']}"
+            )
             request_context = {
                 "metadata": {
                     "app_name": self.target_package,
                     "milestone_range": range_name,
-                    "total_delay_delta_ms": round(milestone_context["total_delay_ms"], 1),
-                    "investigation_date": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "total_delay_delta_ms": round(
+                        milestone_context["total_delay_ms"], 1
+                    ),
+                    "investigation_date": datetime.datetime.now().strftime(
+                        "%Y-%m-%d %H:%M:%S"
+                    ),
                     "captured_delay_ms": captured_delay_ms,
                     "coverage_efficiency": coverage_efficiency,
                     "overlap_factor": overlap_factor,
-                    "concurrency_mode": concurrency_mode
+                    "concurrency_mode": concurrency_mode,
                 },
                 "incidents": incidents_result_data,
-                "global_timeline_summary": overall_timeline_context
+                "global_timeline_summary": overall_timeline_context,
             }
 
             Logger.log(f"DeepAnalysis request\n{request_context}")
 
             ai_context = [
                 {"role": "system", "content": self.system_prompt_template},
-                {"role": "user", "content": json.dumps(request_context, indent=2, ensure_ascii=False)}
+                {
+                    "role": "user",
+                    "content": json.dumps(
+                        request_context, indent=2, ensure_ascii=False
+                    ),
+                },
             ]
 
             full_response_text = self.request_analysis(ai_context)
 
-            anchor_match = re.search(r"Supreme\s+Verdict", full_response_text, re.IGNORECASE)
+            anchor_match = re.search(
+                r"Supreme\s+Verdict", full_response_text, re.IGNORECASE
+            )
             if anchor_match:
                 anchor_idx = anchor_match.start()
-                line_start_idx = full_response_text.rfind('\n', 0, anchor_idx) + 1
+                line_start_idx = full_response_text.rfind("\n", 0, anchor_idx) + 1
                 raw_thought = full_response_text[:line_start_idx].strip()
                 final_summary = full_response_text[line_start_idx:].strip()
-                ai_thought = re.sub(r"\[{1,2}/?THOUGHT\]{1,2}", "", raw_thought, flags=re.IGNORECASE).strip()
+                ai_thought = re.sub(
+                    r"\[{1,2}/?THOUGHT\]{1,2}", "", raw_thought, flags=re.IGNORECASE
+                ).strip()
                 if not ai_thought:
                     ai_thought = "None"
             else:
                 ai_thought = "None"
                 final_summary = full_response_text.strip()
 
-            if self.output_callback:
-                self.output_callback(f"\n🧠 [AI Thinking...]\n{ai_thought}\n")
+            if self.event_poster:
+                self.event_poster.log(f"\n🧠 [AI Thinking...]\n{ai_thought}\n")
 
             investigation_report = {
                 "milestone_context": milestone_context,
                 "final_ai_summary": final_summary,
-                "raw_data": incidents_result_data 
+                "raw_data": incidents_result_data,
             }
             self.generate_final_report(investigation_report)
-            
+
     def request_analysis(self, context):
         llm = self.llm_requester
         if not llm:
@@ -160,29 +182,35 @@ You MUST strictly follow this logical flow inside [[THOUGHT]] tags:
         raw_res = llm.request(
             context=context,
             options=llm.get_insight_scan_option(),
-            chunk_callback=lambda chunk: llm.chunk_callback(chunk, self.output_callback)
+            chunk_callback=lambda chunk: llm.chunk_callback(chunk, self.event_poster),
         )
-        total_tokens = raw_res.get("prompt_eval_count", 0) + raw_res.get("eval_count", 0)
-        if self.output_callback:
-            self.output_callback(f"\n\\token {total_tokens}")
+        total_tokens = raw_res.get("prompt_eval_count", 0) + raw_res.get(
+            "eval_count", 0
+        )
+        if self.event_poster:
+            self.event_poster.log(f"\n\\token {total_tokens}")
         return raw_res.get("message", {}).get("content", "")
 
     def generate_final_report(self, investigation_report):
         milestone_context = investigation_report["milestone_context"]
         report_text = investigation_report["final_ai_summary"]
         raw_data = investigation_report["raw_data"]
-        
-        range_name = f"{milestone_context['start_name']} ~ {milestone_context['end_name']}"
-        total_delay = milestone_context.get('total_delay_ms', 0)
-        
+
+        range_name = (
+            f"{milestone_context['start_name']} ~ {milestone_context['end_name']}"
+        )
+        total_delay = milestone_context.get("total_delay_ms", 0)
+
         progress_val = min(int(total_delay / 20), 5)
         progress_bar = "■" * progress_val + "□" * (5 - progress_val)
-        
+
         case_list_str = ""
         for case in raw_data:
-            m = case['incident_meta']
+            m = case["incident_meta"]
             case_list_str += f"  • Case {case['set_no']}: {case['case_name']} ({m['delta_time']}ms)\n"
-            case_list_str += f"    └─ [Self: {m['self_time']}ms | Wait: {m['wait_time']}ms]\n"
+            case_list_str += (
+                f"    └─ [Self: {m['self_time']}ms | Wait: {m['wait_time']}ms]\n"
+            )
 
         final_report = f"""
 ───────────────────────────────────────
@@ -202,6 +230,6 @@ You MUST strictly follow this logical flow inside [[THOUGHT]] tags:
 
 ───────────────────────────────────────
 """
-        if self.output_callback:
-            self.output_callback(final_report)
+        if self.event_poster:
+            self.event_poster.log(final_report)
         return final_report

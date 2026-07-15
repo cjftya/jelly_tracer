@@ -1,18 +1,16 @@
 import gc
-import threading
 
+from application.event_poster import EventPoster
 from core.analysis.deep_analysis import DeepAnalysis
 from core.analysis.fast_analysis import FastAnalysis
 from core.common_api import CommonAPI
-from core.scanner.insight_scanner.insight_scanner import InsightScanner
 from core.scanner.point_scanner.point_scanner import PointScanner
-from ui.point_scan_view import PointScanUI
-from util.log import Logger
+from ui.point_scan_view import PointScanView
 
 
 class FusionCoreEngine:
     def __init__(self):
-        self.output_callback = None
+        self.event_poster = EventPoster()
         self.llm_requester = None
         self.range_callback = None
         self.chart_canvas = None
@@ -22,7 +20,7 @@ class FusionCoreEngine:
         self.target_package = None
 
         self.point_scanner = PointScanner()
-        self.point_scan_ui = PointScanUI()
+        self.point_scan_view = PointScanView()
 
         self.fast_analysis = FastAnalysis()
         self.deep_analysis = DeepAnalysis()
@@ -36,20 +34,16 @@ class FusionCoreEngine:
 
         self.common_api = None
 
-    def _output(self, message, is_error=False):
-        if self.output_callback:
-            self.output_callback(message, is_error)
-
     def start(
         self,
         llm_requester,
-        output_callback,
+        log_callback,
         range_callback=None,
         on_slices_ready=None,
         on_selected_incidents_ready=None,
         milestone_targets=None,
     ):
-        self.output_callback = output_callback
+        self.event_poster.set_log_handler(log_callback)
         self.llm_requester = llm_requester
         self.range_callback = range_callback
         self.on_slices_ready = on_slices_ready
@@ -67,7 +61,7 @@ class FusionCoreEngine:
             self.common_api,
             self.target_package,
             self.llm_requester,
-            self.output_callback,
+            self.event_poster,
             self.milestone_targets,
         )
 
@@ -76,7 +70,7 @@ class FusionCoreEngine:
 
         # Draw data initialization
         if chart_canvas and self.point_scanner.milestones:
-            self.point_scan_ui.set_info(
+            self.point_scan_view.set_info(
                 self.point_scanner.milestones, self.point_scanner.milestone_marks
             )
 
@@ -87,12 +81,10 @@ class FusionCoreEngine:
 
     def update_range_info(self):
         self.point_scanner.milestone_start_index = (
-            self.point_scan_ui.selected_start_index
+            self.point_scan_view.selected_start_index
         )
-        self.point_scanner.milestone_end_index = self.point_scan_ui.selected_end_index
-        self.selected_collected_data = self.point_scanner.run(
-            output_callback=self.output_callback
-        )
+        self.point_scanner.milestone_end_index = self.point_scan_view.selected_end_index
+        self.selected_collected_data = self.point_scanner.run()
 
         selected_incidents = []
         if self.selected_collected_data:
@@ -119,26 +111,26 @@ class FusionCoreEngine:
             if hasattr(chart_canvas, "after"):
                 chart_canvas.after(
                     0,
-                    lambda: self.point_scan_ui.draw(
+                    lambda: self.point_scan_view.draw(
                         chart_canvas, self.selected_collected_data
                     ),
                 )
             else:
-                self.point_scan_ui.draw(chart_canvas, self.selected_collected_data)
+                self.point_scan_view.draw(chart_canvas, self.selected_collected_data)
 
-        self._output("Completed drawing chart UI")
+        self.event_poster.log("Completed drawing chart UI")
 
     def on_chart_view_drag_start(self, event, chart_canvas):
-        self.point_scan_ui.on_chart_view_drag_start(event, chart_canvas)
+        self.point_scan_view.on_chart_view_drag_start(event, chart_canvas)
 
     def on_chart_view_drag(self, event, chart_canvas):
-        self.point_scan_ui.on_chart_view_drag(event, chart_canvas)
+        self.point_scan_view.on_chart_view_drag(event, chart_canvas)
 
     def on_chart_view_zoom(self, event, chart_canvas):
-        self.point_scan_ui.on_chart_view_zoom(event, chart_canvas)
+        self.point_scan_view.on_chart_view_zoom(event, chart_canvas)
 
     def on_chart_view_resize(self, event, chart_canvas):
-        self.point_scan_ui.on_chart_view_resize(event, chart_canvas)
+        self.point_scan_view.on_chart_view_resize(event, chart_canvas)
 
     def on_find_incidents_clicked(self):
         self.update_range_info()
@@ -163,39 +155,42 @@ class FusionCoreEngine:
         if self.on_selected_incidents_ready:
             self.on_selected_incidents_ready(self.selected_incidents_list, choice)
 
-    def run(self, output_callback=None, mode=None):
-        if output_callback:
-            self.output_callback = output_callback
-
+    def run(self, mode=None):
         self.mode = mode
         if self.is_fast_analysis():
             self.fast_analysis.start(
                 self.common_api,
                 self.target_package,
                 self.llm_requester,
-                self.output_callback,
+                self.event_poster,
             )
         elif self.is_deep_analysis():
             self.deep_analysis.start(
                 self.common_api,
                 self.target_package,
                 self.llm_requester,
-                self.output_callback,
+                self.event_poster,
             )
 
         if self.selected_collected_data is None:
-            self._output("⚠️ [Error] Collected data is missing. Cannot proceed.", True)
+            self.event_poster.log(
+                "⚠️ [Error] Collected data is missing. Cannot proceed.", True
+            )
             return
 
         if not self.selected_incidents_list or self.selected_incidents_list == [
             "Selected Incidents"
         ]:
-            self._output("⚠️ [Error] No incidents selected. Cannot proceed.", True)
+            self.event_poster.log(
+                "⚠️ [Error] No incidents selected. Cannot proceed.", True
+            )
             return
 
         current_values = self.selected_incidents_list
         if current_values == ["Selected Incidents"]:
-            self._output("⚠️ [Error] No incidents selected. Cannot proceed.", True)
+            self.event_poster.log(
+                "⚠️ [Error] No incidents selected. Cannot proceed.", True
+            )
             return
 
         incident_map = {
@@ -232,9 +227,9 @@ class FusionCoreEngine:
         customize_incidents["incidents"] = selected_incidents
         customize_incidents["overall_timeline_context"] = overall_timeline_context
         if self.is_fast_analysis():
-            self.fast_analysis.run(customize_incidents, output_callback=output_callback)
+            self.fast_analysis.run(customize_incidents, event_poster=self.event_poster)
         elif self.is_deep_analysis():
-            self.deep_analysis.run(customize_incidents, output_callback=output_callback)
+            self.deep_analysis.run(customize_incidents, event_poster=self.event_poster)
 
     def stop(self):
         if self.point_scanner:
