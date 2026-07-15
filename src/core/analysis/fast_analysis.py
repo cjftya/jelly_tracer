@@ -1,5 +1,6 @@
 import json
 
+from core.analysis_context import AnalysisContext
 from core.scanner.insight_scanner.insight_scan_prompt_values import (
     InsightScanPromptValues,
 )
@@ -8,14 +9,14 @@ from core.scanner.insight_scanner.insight_scanner import InsightScanner
 
 class FastAnalysis:
     def __init__(self):
+        self.context = None
         self.insight_scanner = InsightScanner()
 
-    def start(self, common_api, target_package, llm_requester, event_poster):
-        self.insight_scanner.start(
-            common_api, target_package, llm_requester, event_poster
-        )
+    def start(self, context: AnalysisContext) -> None:
+        self.context = context
+        self.insight_scanner.start(context)
 
-    def run(self, collected_data, event_poster):
+    def run(self, collected_data):
         incidents = collected_data.get("incidents", [])
         if incidents:
             primary_incident = incidents[0]
@@ -41,13 +42,13 @@ class FastAnalysis:
             self.insight_scanner.collected_data = primary_incident_data
             final_result = self.insight_scanner.run()
 
-            if final_result:
-                summary_context = final_result[0]
-                final_report = final_result[1]
-                thinking_text = final_result[2]
-
-                event_poster.log(f"\n🧠 [AI Thinking...]\n{thinking_text}\n")
-                event_poster.log(final_report)
+            if final_result and self.context:
+                _, final_report, thinking_text, _ = final_result
+                self.context.event_poster.log(
+                    f"\n🧠 [AI Thinking...]\n{thinking_text}\n"
+                )
+                self.context.event_poster.log(final_report)
 
     def stop(self):
         self.insight_scanner.stop()
+        self.context = None

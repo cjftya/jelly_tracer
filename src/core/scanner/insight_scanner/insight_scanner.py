@@ -1,5 +1,6 @@
 from typing import Any, Dict, List, Optional
 
+from core.analysis_context import AnalysisContext
 from core.scanner.base_scanner import BaseScanner
 from core.scanner.insight_scanner.insight_scan_ai_delegate import InsightScanAIDelegate
 from core.scanner.insight_scanner.insight_scan_data_delegate import (
@@ -16,41 +17,46 @@ class InsightScanner(BaseScanner):
         self.data_provider: Optional[InsightScanDataDelegate] = None
         self.ai_analyst: Optional[InsightScanAIDelegate] = None
 
-    def start(self, common_api, target_package, llm_requester, event_poster):
-        super().start(common_api, target_package, llm_requester, event_poster)
+    def start(self, context: AnalysisContext):
+        super().start(context)
         if self.data_provider is None:
-            self.data_provider = InsightScanDataDelegate(event_poster)
-            self.data_provider.init(common_api, target_package)
+            self.data_provider = InsightScanDataDelegate(context.event_poster)
+            self.data_provider.init(context.common_api, context.target_package)
         else:
-            self.data_provider.event_poster = event_poster
+            self.data_provider.event_poster = context.event_poster
 
         if self.ai_analyst is None:
-            self.ai_analyst = InsightScanAIDelegate(llm_requester, event_poster)
+            self.ai_analyst = InsightScanAIDelegate(
+                context.llm_requester, context.event_poster
+            )
         else:
-            self.ai_analyst.event_poster = event_poster
+            self.ai_analyst.llm_requester = context.llm_requester
+            self.ai_analyst.event_poster = context.event_poster
 
     def run(self) -> Optional[list]:
+        context = self.require_context()
+        event_poster = context.event_poster
         if self.data_provider:
-            self.data_provider.event_poster = self.event_poster
+            self.data_provider.event_poster = event_poster
         if self.ai_analyst:
-            self.ai_analyst.event_poster = self.event_poster
+            self.ai_analyst.event_poster = event_poster
 
-        if not self.event_poster:
+        if not event_poster:
             return None
 
-        self.event_poster.log(
-            f"🚀 [Insight-Scan] Investigation Started: {self.target_package}"
+        event_poster.log(
+            f"🚀 [Insight-Scan] Investigation Started: {context.target_package}"
         )
 
         if not self.data_provider or not self.ai_analyst:
-            self.event_poster.log(
+            event_poster.log(
                 "⚠️ [Error] Data provider or AI analyst is missing. Cannot proceed.",
                 True,
             )
             return None
 
         if not self.collected_data:
-            self.event_poster.log(
+            event_poster.log(
                 "⚠️ [Error] Master data (collected_data) is missing. Cannot proceed.",
                 True,
             )
@@ -61,7 +67,7 @@ class InsightScanner(BaseScanner):
         )
 
         try:
-            self.event_poster.log("🔬 Drilling into trace layers ...")
+            event_poster.log("🔬 Drilling into trace layers ...")
             deep_dive_evidences = self.data_provider.fetch_deep_dive_package(
                 self.collected_data
             )
@@ -69,13 +75,13 @@ class InsightScanner(BaseScanner):
             full_tree_evidence = deep_dive_evidences[1]
 
             if not deep_dive_evidence:
-                self.event_poster.log(
+                event_poster.log(
                     "⚠️ [Error] Deep dive evidence is missing. Cannot proceed.", True
                 )
                 return None
 
             summary_context = self.data_provider.summarize_investigation(
-                self.target_package,
+                context.target_package,
                 self.collected_data["milestones"],
                 self.collected_data["overall_timeline_context"],
                 deep_dive_evidence,
@@ -92,7 +98,7 @@ class InsightScanner(BaseScanner):
                     if raw_res
                     else "No response from AI"
                 )
-                self.event_poster.log(f"⚠️ AI Analysis failed: {error_msg}", True)
+                event_poster.log(f"⚠️ AI Analysis failed: {error_msg}", True)
                 return None
 
             final_report = self.generate_final_report(summary_context, raw_res)
@@ -103,7 +109,7 @@ class InsightScanner(BaseScanner):
             )
             return [summary_context, final_report, thinking_text, indented_ai_report]
         except Exception as e:
-            self.event_poster.log(
+            event_poster.log(
                 f"❌ [Critical Error] Insight Scan failed: {str(e)}", True
             )
 

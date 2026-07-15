@@ -1,20 +1,22 @@
 from typing import Any, List, Optional
 
+from core.analysis_context import AnalysisContext
+
 
 class BaseScanner:
     def __init__(self):
-        self.event_poster = None
-        self.llm_requester = None
-        self.target_package = None
+        self.context: Optional[AnalysisContext] = None
 
-    def start(self, common_api, target_package, llm_requester, event_poster):
-        self.target_package = target_package
-        self.event_poster = event_poster
-        self.llm_requester = llm_requester
+    def start(self, context: AnalysisContext) -> None:
+        self.context = context
 
-    def stop(self):
-        self.llm_requester = None
-        self.event_poster = None
+    def require_context(self) -> AnalysisContext:
+        if self.context is None:
+            raise RuntimeError("Analysis context has not been initialized.")
+        return self.context
+
+    def stop(self) -> None:
+        self.context = None
 
     def run(self) -> Optional[List[Any]]:
         pass

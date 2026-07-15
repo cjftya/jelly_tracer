@@ -1,6 +1,7 @@
 import gc
 
 from application.event_poster import EventPoster
+from core.analysis_context import AnalysisContext
 from core.analysis.deep_analysis import DeepAnalysis
 from core.analysis.fast_analysis import FastAnalysis
 from core.common_api import CommonAPI
@@ -33,6 +34,7 @@ class FusionCoreEngine:
         self.milestone_targets = None
 
         self.common_api = None
+        self.analysis_context: AnalysisContext | None = None
 
     def start(
         self,
@@ -56,13 +58,15 @@ class FusionCoreEngine:
         self.trace_slow = trace_slow
         self.target_package = target_package
         self.common_api = CommonAPI(trace_normal, trace_slow, target_package)
+        self.analysis_context = AnalysisContext(
+            common_api=self.common_api,
+            target_package=target_package,
+            llm_requester=self.llm_requester,
+            event_poster=self.event_poster,
+        )
 
         self.point_scanner.start(
-            self.common_api,
-            self.target_package,
-            self.llm_requester,
-            self.event_poster,
-            self.milestone_targets,
+            self.analysis_context, self.milestone_targets
         )
 
         if self.range_callback:
@@ -156,21 +160,17 @@ class FusionCoreEngine:
             self.on_selected_incidents_ready(self.selected_incidents_list, choice)
 
     def run(self, mode=None):
+        if self.analysis_context is None:
+            self.event_poster.log(
+                "⚠️ [Error] Collected data is missing. Cannot proceed.", True
+            )
+            return
+
         self.mode = mode
         if self.is_fast_analysis():
-            self.fast_analysis.start(
-                self.common_api,
-                self.target_package,
-                self.llm_requester,
-                self.event_poster,
-            )
+            self.fast_analysis.start(self.analysis_context)
         elif self.is_deep_analysis():
-            self.deep_analysis.start(
-                self.common_api,
-                self.target_package,
-                self.llm_requester,
-                self.event_poster,
-            )
+            self.deep_analysis.start(self.analysis_context)
 
         if self.selected_collected_data is None:
             self.event_poster.log(
@@ -227,9 +227,9 @@ class FusionCoreEngine:
         customize_incidents["incidents"] = selected_incidents
         customize_incidents["overall_timeline_context"] = overall_timeline_context
         if self.is_fast_analysis():
-            self.fast_analysis.run(customize_incidents, event_poster=self.event_poster)
+            self.fast_analysis.run(customize_incidents)
         elif self.is_deep_analysis():
-            self.deep_analysis.run(customize_incidents, event_poster=self.event_poster)
+            self.deep_analysis.run(customize_incidents)
 
     def stop(self):
         if self.point_scanner:

@@ -1,7 +1,9 @@
 import datetime
 import json
 import re
+from typing import Optional
 
+from core.analysis_context import AnalysisContext
 from core.scanner.insight_scanner.insight_scanner import InsightScanner
 from util.log import Logger
 
@@ -9,9 +11,7 @@ from util.log import Logger
 class DeepAnalysis:
     def __init__(self):
         self.insight_scanner = InsightScanner()
-        self.target_package = None
-        self.llm_requester = None
-        self.event_poster = None
+        self.context: Optional[AnalysisContext] = None
 
         self.system_prompt_template = """
 # [Role]
@@ -47,18 +47,20 @@ You MUST strictly follow this logical flow inside [[THOUGHT]] tags:
 - **Fact-Only**: Use only the provided metadata and incident data.
         """
 
-    def start(self, common_api, target_package, llm_requester, event_poster):
-        self.target_package = target_package
-        self.insight_scanner.start(
-            common_api, target_package, llm_requester, event_poster
-        )
-        self.llm_requester = llm_requester
-        self.event_poster = event_poster
+    def start(self, context: AnalysisContext):
+        self.context = context
+        self.insight_scanner.start(context)
+
+    def _require_context(self) -> AnalysisContext:
+        if self.context is None:
+            raise RuntimeError("Analysis context has not been initialized.")
+        return self.context
 
     def stop(self):
         self.insight_scanner.stop()
+        self.context = None
 
-    def run(self, collected_data, event_poster):
+    def run(self, collected_data):
         incidents = collected_data.get("incidents", [])
         milestone_context = collected_data.get("milestone_info", {})
         captured_delay_ms = collected_data.get("captured_delay_ms", 0)
@@ -117,7 +119,7 @@ You MUST strictly follow this logical flow inside [[THOUGHT]] tags:
             )
             request_context = {
                 "metadata": {
-                    "app_name": self.target_package,
+                    "app_name": self._require_context().target_package,
                     "milestone_range": range_name,
                     "total_delay_delta_ms": round(
                         milestone_context["total_delay_ms"], 1
@@ -165,8 +167,8 @@ You MUST strictly follow this logical flow inside [[THOUGHT]] tags:
                 ai_thought = "None"
                 final_summary = full_response_text.strip()
 
-            if self.event_poster:
-                self.event_poster.log(f"\n🧠 [AI Thinking...]\n{ai_thought}\n")
+            if self._require_context().event_poster:
+                self._require_context().event_poster.log(f"\n🧠 [AI Thinking...]\n{ai_thought}\n")
 
             investigation_report = {
                 "milestone_context": milestone_context,
@@ -176,19 +178,19 @@ You MUST strictly follow this logical flow inside [[THOUGHT]] tags:
             self.generate_final_report(investigation_report)
 
     def request_analysis(self, context):
-        llm = self.llm_requester
+        llm = self._require_context().llm_requester
         if not llm:
             return ""
         raw_res = llm.request(
             context=context,
             options=llm.get_insight_scan_option(),
-            chunk_callback=lambda chunk: llm.chunk_callback(chunk, self.event_poster),
+            chunk_callback=lambda chunk: llm.chunk_callback(chunk, self._require_context().event_poster),
         )
         total_tokens = raw_res.get("prompt_eval_count", 0) + raw_res.get(
             "eval_count", 0
         )
-        if self.event_poster:
-            self.event_poster.log(f"\n\\token {total_tokens}")
+        if self._require_context().event_poster:
+            self._require_context().event_poster.log(f"\n\\token {total_tokens}")
         return raw_res.get("message", {}).get("content", "")
 
     def generate_final_report(self, investigation_report):
@@ -219,7 +221,7 @@ You MUST strictly follow this logical flow inside [[THOUGHT]] tags:
 ℹ️ [ CASE METADATA ]
   • 🗓️ Timeline : {range_name}
   • ⏱️ Duration : {total_delay:,.1f} ms (Total Delta)
-  • 🎯 Target   : {self.target_package}
+  • 🎯 Target   : {self._require_context().target_package}
   • ⚡ Impact   : {progress_bar}
 
 🧠 [ AI SUPREME VERDICT & ANALYSIS ]
@@ -230,6 +232,6 @@ You MUST strictly follow this logical flow inside [[THOUGHT]] tags:
 
 ───────────────────────────────────────
 """
-        if self.event_poster:
-            self.event_poster.log(final_report)
+        if self._require_context().event_poster:
+            self._require_context().event_poster.log(final_report)
         return final_report

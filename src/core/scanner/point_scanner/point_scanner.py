@@ -1,5 +1,6 @@
 from typing import Any, Dict, List, Optional
 
+from core.analysis_context import AnalysisContext
 from core.scanner.base_scanner import BaseScanner
 from core.scanner.point_scanner.point_scan_data_delegate import PointScanDataDelegate
 from util.log import Logger
@@ -16,18 +17,13 @@ class PointScanner(BaseScanner):
         self.milestone_start_index = -1
         self.milestone_end_index = -1
 
-    def start(
-        self,
-        common_api,
-        target_package,
-        llm_requester,
-        event_poster,
-        milestone_targets=None,
-    ):
-        super().start(common_api, target_package, llm_requester, event_poster)
+    def start(self, context: AnalysisContext, milestone_targets=None):
+        super().start(context)
 
-        self.data_provider = PointScanDataDelegate(event_poster, milestone_targets)
-        self.data_provider.init(common_api)
+        self.data_provider = PointScanDataDelegate(
+            context.event_poster, milestone_targets
+        )
+        self.data_provider.init(context.common_api)
 
         self.milestones = self.data_provider.calculate_common_milestones()
         if self.data_provider.milestones_registry:
@@ -44,26 +40,28 @@ class PointScanner(BaseScanner):
         if not self.data_provider:
             return None
 
-        self.data_provider.event_poster = self.event_poster
+        context = self.require_context()
+        event_poster = context.event_poster
+        self.data_provider.event_poster = event_poster
 
-        if self.event_poster:
-            self.event_poster.log(
-                f"🚀 [Point-Scan] Global Investigation Started: {self.target_package}"
+        if event_poster:
+            event_poster.log(
+                f"🚀 [Point-Scan] Global Investigation Started: {context.target_package}"
             )
 
         # ---------------------------------------------------------
         # Step 1: 전수 조사 실행 (Global Point-Scan)
         # ---------------------------------------------------------
         point_scan_result = self.data_provider.run_point_scan(
-            target_package_name=self.target_package,
+            target_package_name=context.target_package,
             start_milestone_index=self.milestone_start_index,
             end_milestone_index=self.milestone_end_index,
         )
 
         # 분석할 만한 유의미한 데이터가 없는 경우 종료
         if not point_scan_result or not point_scan_result.get("incidents"):
-            if self.event_poster:
-                self.event_poster.log(
+            if event_poster:
+                event_poster.log(
                     "⚠️ [Notice] No significant delay incidents found in current scope.",
                     True,
                 )
@@ -74,8 +72,8 @@ class PointScanner(BaseScanner):
         # ---------------------------------------------------------
         final_master_data = self.collect_analyze_data(point_scan_result)
 
-        if self.event_poster:
-            self.event_poster.log(
+        if event_poster:
+            event_poster.log(
                 "✅ [Point-Scan] Evidence collection concluded. Ready for Analysis Phase.\n\n"
             )
 
