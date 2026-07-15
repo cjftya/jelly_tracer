@@ -14,8 +14,6 @@ class PointScanner(BaseScanner):
         self.milestones: Optional[List[Dict[str, Any]]] = None
         self.milestone_names: Optional[List[str]] = None
         self.milestone_marks: Optional[List[Any]] = None
-        self.milestone_start_index = -1
-        self.milestone_end_index = -1
 
     def start(self, context: AnalysisContext, milestone_targets=None):
         super().start(context)
@@ -26,23 +24,25 @@ class PointScanner(BaseScanner):
         self.data_provider.init(context.common_api)
 
         self.milestones = self.data_provider.calculate_common_milestones()
-        if self.data_provider.milestones_registry:
-            self.milestone_names = [
-                m["name"] for m in self.data_provider.milestones_registry
-            ]
+        if not self.milestones:
+            self.milestone_names = []
+            self.milestone_marks = []
+            return
+
+        self.milestone_names = [
+            m["name"] for m in self.data_provider.milestones_registry
+        ]
         self.milestone_marks = self.data_provider.milestone_marks
 
     def stop(self):
         super().stop()
 
-    def run(self) -> Any:
-        super().run()
-        if not self.data_provider:
+    def run(self, start_index: int, end_index: int) -> Any:
+        if not self.data_provider or not self.milestones:
             return None
 
         context = self.require_context()
         event_poster = context.event_poster
-        self.data_provider.event_poster = event_poster
 
         if event_poster:
             event_poster.log(
@@ -54,8 +54,8 @@ class PointScanner(BaseScanner):
         # ---------------------------------------------------------
         point_scan_result = self.data_provider.run_point_scan(
             target_package_name=context.target_package,
-            start_milestone_index=self.milestone_start_index,
-            end_milestone_index=self.milestone_end_index,
+            start_milestone_index=start_index,
+            end_milestone_index=end_index,
         )
 
         # 분석할 만한 유의미한 데이터가 없는 경우 종료
@@ -70,7 +70,9 @@ class PointScanner(BaseScanner):
         # ---------------------------------------------------------
         # Step 2: 마스터 데이터 조립 (Data Packaging)
         # ---------------------------------------------------------
-        final_master_data = self.collect_analyze_data(point_scan_result)
+        final_master_data = self.collect_analyze_data(
+            point_scan_result, start_index, end_index
+        )
 
         if event_poster:
             event_poster.log(
@@ -79,13 +81,13 @@ class PointScanner(BaseScanner):
 
         return final_master_data
 
-    def collect_analyze_data(self, point_scan_result):
+    def collect_analyze_data(self, point_scan_result, start_index: int, end_index: int):
         if not self.milestones:
             return {}
 
         # 1. 마일스톤 좌표 확보
-        start_milestone_data = self.milestones[self.milestone_start_index]
-        end_milestone_data = self.milestones[self.milestone_end_index]
+        start_milestone_data = self.milestones[start_index]
+        end_milestone_data = self.milestones[end_index]
 
         # 2. 최종 마스터 데이터 조립
         master_data = {
@@ -94,8 +96,8 @@ class PointScanner(BaseScanner):
                 "end_name": end_milestone_data["name"],
                 "start_ts_ns": start_milestone_data["ts_s_start"],
                 "end_ts_ns": end_milestone_data["ts_s_end"],
-                "start_index": self.milestone_start_index,
-                "end_index": self.milestone_end_index,
+                "start_index": start_index,
+                "end_index": end_index,
                 "total_delay_ms": point_scan_result["analysis_metadata"][
                     "total_delay_ms"
                 ],

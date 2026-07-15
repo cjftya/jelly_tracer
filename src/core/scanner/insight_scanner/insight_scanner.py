@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 from core.analysis_context import AnalysisContext
 from core.scanner.base_scanner import BaseScanner
@@ -21,9 +21,8 @@ class InsightScanner(BaseScanner):
         super().start(context)
         if self.data_provider is None:
             self.data_provider = InsightScanDataDelegate(context.event_poster)
-            self.data_provider.init(context.common_api, context.target_package)
-        else:
-            self.data_provider.event_poster = context.event_poster
+        self.data_provider.event_poster = context.event_poster
+        self.data_provider.init(context.common_api, context.target_package)
 
         if self.ai_analyst is None:
             self.ai_analyst = InsightScanAIDelegate(
@@ -36,10 +35,6 @@ class InsightScanner(BaseScanner):
     def run(self) -> Optional[list]:
         context = self.require_context()
         event_poster = context.event_poster
-        if self.data_provider:
-            self.data_provider.event_poster = event_poster
-        if self.ai_analyst:
-            self.ai_analyst.event_poster = event_poster
 
         if not event_poster:
             return None
@@ -71,12 +66,28 @@ class InsightScanner(BaseScanner):
             deep_dive_evidences = self.data_provider.fetch_deep_dive_package(
                 self.collected_data
             )
+            if (
+                not isinstance(deep_dive_evidences, (list, tuple))
+                or len(deep_dive_evidences) < 2
+            ):
+                event_poster.log(
+                    "⚠️ [Error] Deep dive evidence has an invalid format. Cannot proceed.",
+                    True,
+                )
+                return None
+
             deep_dive_evidence = deep_dive_evidences[0]
             full_tree_evidence = deep_dive_evidences[1]
 
             if not deep_dive_evidence:
                 event_poster.log(
                     "⚠️ [Error] Deep dive evidence is missing. Cannot proceed.", True
+                )
+                return None
+            if not full_tree_evidence:
+                event_poster.log(
+                    "⚠️ [Error] Deep dive tree evidence is missing. Cannot proceed.",
+                    True,
                 )
                 return None
 
@@ -87,6 +98,11 @@ class InsightScanner(BaseScanner):
                 deep_dive_evidence,
                 full_tree_evidence,
             )
+            if not summary_context:
+                event_poster.log(
+                    "⚠️ [Error] Investigation summary could not be created.", True
+                )
+                return None
 
             raw_res = self.ai_analyst.request_analysis(
                 summary_context, fact_only=self.collected_data.get("fact_only", False)
@@ -112,6 +128,7 @@ class InsightScanner(BaseScanner):
             event_poster.log(
                 f"❌ [Critical Error] Insight Scan failed: {str(e)}", True
             )
+            return None
 
     def stop(self):
         super().stop()

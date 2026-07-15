@@ -1,9 +1,4 @@
-import json
-
 from core.analysis_context import AnalysisContext
-from core.scanner.insight_scanner.insight_scan_prompt_values import (
-    InsightScanPromptValues,
-)
 from core.scanner.insight_scanner.insight_scanner import InsightScanner
 
 
@@ -17,37 +12,74 @@ class FastAnalysis:
         self.insight_scanner.start(context)
 
     def run(self, collected_data):
+        if self.context is None:
+            return None
+
+        event_poster = self.context.event_poster
+        if not isinstance(collected_data, dict):
+            event_poster.log(
+                "⚠️ [Error] Invalid incident data. Cannot proceed.", True
+            )
+            return None
+
         incidents = collected_data.get("incidents", [])
-        if incidents:
-            primary_incident = incidents[0]
-            primary_incident_data = {}
-            primary_incident_data["target_id"] = primary_incident.get("slice_id")
-            primary_incident_data["start_ts_ns"] = int(
-                primary_incident.get("start_timestamp", 0)
+        if not isinstance(incidents, (list, tuple)) or not incidents:
+            event_poster.log(
+                "⚠️ [Error] No incidents are available for fast analysis.", True
             )
-            primary_incident_data["duration_ns"] = int(
-                primary_incident.get("duration_ns", 0)
-            )
-            primary_incident_data["milestones"] = collected_data.get(
-                "milestone_info", None
-            )
-            primary_incident_data["normal_baseline"] = collected_data.get(
-                "normal_baseline", None
-            )
-            primary_incident_data["overall_timeline_context"] = collected_data.get(
-                "overall_timeline_context", None
-            )
-            primary_incident_data["fact_only"] = False
+            return None
 
-            self.insight_scanner.collected_data = primary_incident_data
-            final_result = self.insight_scanner.run()
+        primary_incident = incidents[0]
+        milestone_info = collected_data.get("milestone_info")
+        if (
+            not isinstance(primary_incident, dict)
+            or not isinstance(milestone_info, dict)
+            or not {"start_name", "end_name", "total_delay_ms"}.issubset(
+                milestone_info
+            )
+        ):
+            event_poster.log(
+                "⚠️ [Error] Incident or milestone data is incomplete.", True
+            )
+            return None
 
-            if final_result and self.context:
-                _, final_report, thinking_text, _ = final_result
-                self.context.event_poster.log(
-                    f"\n🧠 [AI Thinking...]\n{thinking_text}\n"
-                )
-                self.context.event_poster.log(final_report)
+        try:
+            target_id = int(primary_incident["slice_id"])
+            start_ts_ns = int(primary_incident["start_timestamp"])
+            duration_ns = int(primary_incident["duration_ns"])
+        except (KeyError, TypeError, ValueError):
+            event_poster.log(
+                "⚠️ [Error] Incident timing data is invalid.", True
+            )
+            return None
+
+        if target_id <= 0 or start_ts_ns < 0 or duration_ns <= 0:
+            event_poster.log(
+                "⚠️ [Error] Incident timing data is out of range.", True
+            )
+            return None
+
+        primary_incident_data = {
+            "target_id": target_id,
+            "start_ts_ns": start_ts_ns,
+            "duration_ns": duration_ns,
+            "milestones": milestone_info,
+            "normal_baseline": collected_data.get("normal_baseline"),
+            "overall_timeline_context": collected_data.get(
+                "overall_timeline_context"
+            ),
+            "fact_only": False,
+        }
+
+        self.insight_scanner.collected_data = primary_incident_data
+        final_result = self.insight_scanner.run()
+
+        if final_result:
+            _, final_report, thinking_text, _ = final_result
+            event_poster.log(f"\n🧠 [AI Thinking...]\n{thinking_text}\n")
+            event_poster.log(final_report)
+
+        return final_result
 
     def stop(self):
         self.insight_scanner.stop()

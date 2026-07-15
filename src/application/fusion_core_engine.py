@@ -70,7 +70,7 @@ class FusionCoreEngine:
         )
 
         if self.range_callback:
-            self.range_callback(self.point_scanner.milestone_names)
+            self.range_callback(self.point_scanner.milestone_names or [])
 
         # Draw data initialization
         if chart_canvas and self.point_scanner.milestones:
@@ -84,11 +84,10 @@ class FusionCoreEngine:
         self.draw_ui(chart_canvas)
 
     def update_range_info(self):
-        self.point_scanner.milestone_start_index = (
-            self.point_scan_view.selected_start_index
+        self.selected_collected_data = self.point_scanner.run(
+            self.point_scan_view.selected_start_index,
+            self.point_scan_view.selected_end_index,
         )
-        self.point_scanner.milestone_end_index = self.point_scan_view.selected_end_index
-        self.selected_collected_data = self.point_scanner.run()
 
         selected_incidents = []
         if self.selected_collected_data:
@@ -111,7 +110,11 @@ class FusionCoreEngine:
             )
 
     def draw_ui(self, chart_canvas):
-        if self.point_scanner.milestones and len(self.point_scanner.milestones) >= 2:
+        if (
+            chart_canvas
+            and self.point_scanner.milestones
+            and len(self.point_scanner.milestones) >= 2
+        ):
             if hasattr(chart_canvas, "after"):
                 chart_canvas.after(
                     0,

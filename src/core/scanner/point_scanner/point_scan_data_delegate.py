@@ -129,6 +129,12 @@ class PointScanDataDelegate:
             self.event_poster.log("🚨 [Error] Milestones have not been initialized.", True)
             return None
 
+        if not (
+            0 <= start_milestone_index <= end_milestone_index < len(self.milestones_registry)
+        ):
+            self.event_poster.log("🚨 [Error] Invalid milestone range.", True)
+            return None
+
         # 1. 수사 범위(Time Window) 확정
         start_milestone_data = self.milestones_registry[start_milestone_index]
         end_milestone_data = self.milestones_registry[end_milestone_index]
@@ -370,4 +376,3 @@ class PointScanDataDelegate:
                 accumulated_ms += cand['delay_delta_ms']
                 
         return selected
-        

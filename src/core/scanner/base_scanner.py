@@ -1,4 +1,4 @@
-from typing import Any, List, Optional
+from typing import Optional
 
 from core.analysis_context import AnalysisContext
 
@@ -17,6 +17,3 @@ class BaseScanner:
 
     def stop(self) -> None:
         self.context = None
-
-    def run(self) -> Optional[List[Any]]:
-        pass

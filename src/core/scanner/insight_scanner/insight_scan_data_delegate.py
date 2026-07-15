@@ -14,8 +14,10 @@ class InsightScanDataDelegate:
     def init(self, common_api, target_package):
         self._common_api = common_api
         self.package = target_package
+        self.normal_lookup = {}
 
     def set_normal_baseline(self, df_normal):
+        self.normal_lookup = {}
         if df_normal is not None and not df_normal.empty:
             self.normal_lookup = dict(zip(df_normal['name'], df_normal['avg_ms_normal']))
 
